@@ -34,12 +34,13 @@ pkg_check_modules(PKG_HBZ REQUIRED harfbuzz)
 link_directories(${PKG_HBZ_LIBRARY_DIRS})
 include_directories( ${PKG_HBZ_INCLUDE_DIRS} )
 
-add_library(hbfstatic STATIC zhban.c)
-install(TARGETS hbfstatic ARCHIVE DESTINATION lib)
+#add_library(hbfstatic STATIC zhban.c)
+#install(TARGETS hbfstatic ARCHIVE DESTINATION lib)
+
 add_library(zhban SHARED zhban.c)
 target_link_libraries(zhban ${PKG_HBZ_LIBRARIES} ${PKG_FT2_LIBRARIES})
-
 install(TARGETS zhban LIBRARY DESTINATION lib)
 
 install(FILES zhban.h DESTINATION include)
+install(FILES zhban.py DESTINATION lib/python3.2/site-packages)
 
