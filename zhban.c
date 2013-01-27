@@ -170,8 +170,8 @@ zhban_t *zhban_open(const void *data, const uint32_t datalen, int pixheight, uin
             szreq.height = szreq.width;
             szreq.horiResolution = szreq.vertResolution = 0; /* not used. */
 
-            if (!FT_Request_Size(rv->sizer.ft_face, &szreq))
-                if (!FT_Request_Size(rv->render.ft_face, &szreq))
+            if (!(rv->sizer.ft_err = FT_Request_Size(rv->sizer.ft_face, &szreq)))
+                if (!(rv->render.ft_err = FT_Request_Size(rv->render.ft_face, &szreq)))
                     return rv;
             drop_half_zhban(&rv->render);
         }
