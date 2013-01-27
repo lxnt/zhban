@@ -151,6 +151,10 @@ static void drop_half_zhban(struct _half_zhban *half) {
 
 zhban_t *zhban_open(const void *data, const uint32_t datalen, int pixheight, uint32_t sizerlimit, uint32_t renderlimit) {
     zhban_t *rv = malloc(sizeof(zhban_t));
+    if (!rv)
+        return rv;
+
+    memset(rv, 0, sizeof(zhban_t));
     rv->sizer.cache_limit = sizerlimit;
     rv->render.cache_limit = renderlimit;
     if (!open_half_zhban(&rv->sizer, data, datalen)) {
