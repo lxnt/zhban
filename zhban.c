@@ -223,6 +223,7 @@ static void shape_stuff(struct _half_zhban *half, zhban_item_t *item) {
     int horizontal = HB_DIRECTION_IS_HORIZONTAL(hb_buffer_get_direction(half->hb_buffer));
     uint32_t *origin = NULL;
     if (item->texrect.data) {
+        memset(item->texrect.data, 0, item->texrect.w*item->texrect.h*4);
         stuffbaton.pitch = item->texrect.w * 4;
         stuffbaton.first_pixel = item->texrect.data;
         stuffbaton.last_pixel = item->texrect.data + item->texrect.w*item->texrect.h;
