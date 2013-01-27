@@ -298,8 +298,8 @@ static void shape_stuff(struct _half_zhban *half, zhban_item_t *item) {
         if (min_y > y) min_y = y;
         if (max_y < y) max_y = y;
 
-        item->texrect.w = max_x - min_x;
-        item->texrect.h = max_y - min_y;
+        item->texrect.w = max_x - min_x + 1;
+        item->texrect.h = max_y - min_y + 1;
 
         if (horizontal) {
             item->texrect.baseline_offset = max_y;
