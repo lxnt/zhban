@@ -228,12 +228,14 @@ static void shape_stuff(struct _half_zhban *half, zhban_item_t *item) {
         stuffbaton.first_pixel = item->texrect.data;
         stuffbaton.last_pixel = item->texrect.data + item->texrect.w*item->texrect.h;
         stuffbaton.attribute = 0;
-        /* achtung: wrong for vertical scripts */
-        
+        /* origin of the first glyph - inital pen position, whatever. */
         if (horizontal) {
-            origin = stuffbaton.first_pixel + item->texrect.w * item->texrect.baseline_offset + item->texrect.baseline_shift; 
+            int offs = item->texrect.w * (item->texrect.h - item->texrect.baseline_offset - 1);
+            origin = stuffbaton.first_pixel + offs + item->texrect.baseline_shift;
         } else {
-            origin = stuffbaton.first_pixel + item->texrect.w * item->texrect.baseline_shift + item->texrect.baseline_offset; 
+            /* this is most probably wrong. */
+            int offs = item->texrect.w * ( item->texrect.h - item->texrect.baseline_shift );
+            origin = stuffbaton.first_pixel + offs + item->texrect.baseline_offset;
         }
     } else {
         /* disable rendering */
@@ -259,7 +261,8 @@ static void shape_stuff(struct _half_zhban *half, zhban_item_t *item) {
                 stuffbaton.max_y = INT_MIN;
 
                 if (origin) {
-                    stuffbaton.origin = origin + gx + item->texrect.w * (item->texrect.h - gy);
+                    /* origin of the glyph. */
+                    stuffbaton.origin = origin + stuffbaton.pitch * gy + gx;
                     stuffbaton.attribute = 0;
                 }
 
@@ -365,6 +368,12 @@ static int do_stuff(zhban_t *zhban, const uint16_t *string, const uint32_t strsi
                     return 1;
                 }
                 hz->cache_size += item->data_allocd - freed;
+
+                /* copy geometry so we know where to render */
+                item->texrect.w = rv->w;
+                item->texrect.h = rv->h;
+                item->texrect.baseline_offset = rv->baseline_offset;
+                item->texrect.baseline_shift = rv->baseline_shift;
             }
         } else {
             /* strictly necessary for documentation */
