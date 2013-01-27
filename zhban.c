@@ -20,6 +20,8 @@
     distribution.
 */
 
+#include <stdio.h>
+
 #include "zhban.h"
 
 #include <uthash.h>
@@ -63,18 +65,29 @@ static void spanner(int y, int count, const FT_Span* spans, void *user) {
         if (spans[i].x < baton->min_span_x)
             baton->min_span_x = spans[i].x;
 
-        if (rendering && scanline >= baton->first_pixel) {
-            uint32_t *start = scanline + spans[i].x;
-            uint16_t coverage = (spans[i].coverage<<8) | spans[i].coverage; // bit-replicate ala png
-            uint16_t attribute = baton->attribute;
+        if (rendering) {
+            if (scanline >= baton->first_pixel) {
+                uint32_t *start = scanline + spans[i].x;
+                uint16_t coverage = (spans[i].coverage<<8) | spans[i].coverage; // bit-replicate ala png
+                uint16_t attribute = baton->attribute;
 
-            if (start + spans[i].len < baton->last_pixel) {
-                for (int x = 0; x < spans[i].len; x++) {
-                    // achtung: endianness.
-                    uint32_t t = *start & 0x0000FFFFU;
-                    t |= (attribute << 16) | coverage;
-                    *start++ = t;
+                if (start + spans[i].len < baton->last_pixel) {
+                    for (int x = 0; x < spans[i].len; x++) {
+                        // achtung: endianness, RMW
+                        uint32_t t = *start & 0x0000FFFFU;
+                        t |= (attribute << 16) | coverage;
+                        *start++ = t;
+                    }
+                } else {
+                    printf("span %d origin %p pitch %d scanline %p fp %p lp %p\n", i,
+                            baton->origin, baton->pitch, scanline, baton->first_pixel, baton->last_pixel);
+                    printf("span %d x=%d-%d y=%d start+len > last_pixel (%p + %d > %p).\n", i, spans[i].x, spans[i].x + spans[i].len, y,
+                        start, spans[i].len, baton->last_pixel);
                 }
+            } else {
+                printf("span %d origin %p pitch %d scanline %p fp %p lp %p\n", i,
+                        baton->origin, baton->pitch, scanline, baton->first_pixel, baton->last_pixel);
+                printf("span %d x=%d-%d y=%d scanline < first_pixel.\n", i, spans[i].x, spans[i].x + spans[i].len, y);
             }
         }
     }
@@ -173,10 +186,12 @@ zhban_t *zhban_open(const void *data, const uint32_t datalen, int pixheight, uin
             if (!(rv->sizer.ft_err = FT_Request_Size(rv->sizer.ft_face, &szreq)))
                 if (!(rv->render.ft_err = FT_Request_Size(rv->render.ft_face, &szreq)))
                     return rv;
+
             drop_half_zhban(&rv->render);
         }
         drop_half_zhban(&rv->sizer);
     }
+    printf("zhban_open(): sizer 0x%02X render 0x%02X\n", rv->sizer.ft_err, rv->render.ft_err);
     free(rv);
     return NULL;
 }
@@ -247,7 +262,7 @@ static void shape_stuff(struct _half_zhban *half, zhban_item_t *item) {
     FT_Error fterr;
     for (unsigned j = 0; j < glyph_count; ++j) {
         if ((fterr = FT_Load_Glyph(half->ft_face, glyph_info[j].codepoint, 0))) {
-            printf("load %08x failed fterr=%d.\n",  glyph_info[j].codepoint, fterr);
+            printf("load %08x failed fterr=0x%02x\n",  glyph_info[j].codepoint, fterr);
         } else {
             if (half->ft_face->glyph->format != FT_GLYPH_FORMAT_OUTLINE) {
                 printf("glyph->format = %4s\n", (char *)&half->ft_face->glyph->format);
@@ -267,7 +282,7 @@ static void shape_stuff(struct _half_zhban *half, zhban_item_t *item) {
                 }
 
                 if ((fterr = FT_Outline_Render(half->ft_lib, &half->ft_face->glyph->outline, &ftr_params)))
-                    printf("FT_Outline_Render() failed err=%d\n", fterr);
+                    printf("FT_Outline_Render() failed err=0x%02x\n", fterr);
 
                 if (stuffbaton.min_span_x != INT_MAX) {
                 /* Update values if the spanner was actually called. */
@@ -296,7 +311,7 @@ static void shape_stuff(struct _half_zhban *half, zhban_item_t *item) {
         y += glyph_pos[j].y_advance/64;
     }
 
-    if (item->texrect.data == NULL) { /* don't overwrite texrect values if we're rendering. */
+    if (1 || item->texrect.data == NULL) { /* don't overwrite texrect values if we're rendering. */
         if (min_x > x) min_x = x;
         if (max_x < x) max_x = x;
         if (min_y > y) min_y = y;
