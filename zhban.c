@@ -139,9 +139,14 @@ static int open_half_zhban(struct _half_zhban *half, const void *data, const uin
 }
 
 static void drop_half_zhban(struct _half_zhban *half) {
-    hb_buffer_destroy(half->hb_buffer);
-    hb_font_destroy(half->hb_font);
-    FT_Done_Face(half->ft_face);
+    if (half->hb_buffer)
+        hb_buffer_destroy(half->hb_buffer);
+    if (half->hb_font)
+        hb_font_destroy(half->hb_font);
+    if (half->ft_face)
+        FT_Done_Face(half->ft_face);
+    if (half->ft_lib)
+        FT_Done_FreeType(half->ft_lib);
 }
 
 zhban_t *zhban_open(const void *data, const uint32_t datalen, int pixheight, uint32_t sizerlimit, uint32_t renderlimit) {
