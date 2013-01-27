@@ -300,7 +300,7 @@ static int do_stuff(zhban_t *zhban, const uint16_t *string, const uint32_t strsi
     zhban_item_t *item;
     struct _half_zhban *hz;
     uint32_t itemsize;
-    
+
     if (do_render) {
         hz = &zhban->sizer;
         itemsize = sizeof(zhban_item_t) + strsize;
@@ -308,7 +308,7 @@ static int do_stuff(zhban_t *zhban, const uint16_t *string, const uint32_t strsi
         hz = &zhban->render;
         itemsize = sizeof(zhban_item_t) + strsize + rv->w * rv->h * 4;
     }
-    
+
     HASH_FIND(hh, hz->cache, string, strsize, item);
     if (!item) {
         /* decide if we add new or reuse LRU item */
@@ -322,7 +322,7 @@ static int do_stuff(zhban_t *zhban, const uint16_t *string, const uint32_t strsi
             memset(item, 0, sizeof(zhban_item_t));
             hz->cache_size += sizeof(zhban_item_t);
         }
-        
+
         /* [re]allocate buffers if needed (all sizes memset to 0 when adding new item) */
         if (item->keyallocd < strsize) {
             if (item->key)
@@ -358,7 +358,7 @@ static int do_stuff(zhban_t *zhban, const uint16_t *string, const uint32_t strsi
         /* copy the key */
         memcpy(item->key, string, strsize);
         item->keysize = strsize;
-        
+
         shape_stuff(hz, item);
         HASH_ADD_KEYPTR(hh, hz->cache, item->key, item->keysize, item);
     } else {
