@@ -127,12 +127,12 @@ static int open_half_zhban(struct _half_zhban *half, const void *data, const uin
     if ((half->ft_err = FT_Init_FreeType(&half->ft_lib)))
         return 1;
 
-    if ((half->ft_err = FT_New_Memory_Face(half->ft_lib, data, datalen, 0, &half->ft_face))) {
-        FT_Done_FreeType(half->ft_lib);
+    if ((half->ft_err = FT_New_Memory_Face(half->ft_lib, data, datalen, 0, &half->ft_face)))
         return 1;
-    }
 
-    force_ucs2_charmap(half->ft_face);
+    if ((half->ft_err = force_ucs2_charmap(half->ft_face)))
+        return half->ft_err;
+
     half->hb_font = hb_ft_font_create(half->ft_face, NULL);
     half->hb_buffer = hb_buffer_create();
     return 0;
