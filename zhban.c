@@ -161,7 +161,12 @@ zhban_t *zhban_open(const void *data, const uint32_t datalen, int pixheight, uin
         if (!open_half_zhban(&rv->render, data, datalen)) {
             FT_Size_RequestRec szreq;
             szreq.type = FT_SIZE_REQUEST_TYPE_SCALES; /* width and height are 16.16 scale values */
-            szreq.width = (pixheight << 16) / rv->sizer.ft_face->height; /*->height: line interval in font units */
+            /*  scale value is 16.16 fixed point coefficient defined as FU_val*scale/0x10000 = pixel_val in 26.6
+                (all those fixed point varieties bring madness)
+                we must compute the scale value given the same height in pixels and font units, namely the line interval
+                it's: scale = pixheight / ft_face->height
+                computed as: */
+            szreq.width = ((pixheight << 16) / rv->sizer.ft_face->height) << 6;
             szreq.height = szreq.width;
             szreq.horiResolution = szreq.vertResolution = 0; /* not used. */
 
