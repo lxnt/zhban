@@ -53,22 +53,12 @@ extern_C_curly_opens
 #endif
 
 /* Thread safety:
-    Make a mutex/lock/whatever you want and supply lock|unlock/acquire|release
-    wrappers to the zhb_init(). This will only be used by zhb_openface()/zhb_dropface().
 
-    zhb_fini() is obviosly not thread-safe.
-
-    Intended operation is for the zhb_face_t pointer to be shared between two threads,
-    one repeatedly calling zhb_stringrect(), doing layout, then somehow passing
-    resulting string and aux parameters (pixheight, pointheigh, w) to the other,
-    which repeatedly calls zhb_stringtex(), doing the rendering.
+    Intended operation is for the zhban_t pointer to be shared between two threads,
+    one repeatedly calling zhban_size(), doing layout, then somehow passing
+    resulting string and final rectangle to the other, which repeatedly calls zhban_render().
 
     Caches and all FreeType data is kept in two sets, each used only by one of the functions.
-
-    A zhb_face_t structure can be safely shared between two threads only in the abovementioned
-    manner.
-
-    Additional zhb_face_t structures can be used in additional thread pairs.
 */
 
 typedef struct _zhban zhban_t;
@@ -81,7 +71,7 @@ typedef struct _zhban_rect {
 } zhban_rect_t;
 
 /* prepare to use a font face that FreeType2 can handle.
-    data, size - buffer with the font data
+    data, size - buffer with the font data (must not be freed or modified before drop() call)
     pixheight - desired line interval in pixels
     sizerlimit, renderlimit - cache limits in bytes, excluding uthash overhead.
 */
@@ -96,8 +86,7 @@ ZHB_EXPORT void zhban_drop(zhban_t *);
         string - UCS-2 string buffer
         strsize - string buffer size in bytes
     out
-        pointheight - line interval in points that corresponds to pixheight
-        rv - sizes
+        rv - rect w/o render
     return value - nonzero on error
 */
 ZHB_EXPORT int zhban_size(zhban_t *zhban, const uint16_t *string, const uint32_t strsize,
@@ -115,7 +104,7 @@ ZHB_EXPORT int zhban_size(zhban_t *zhban, const uint16_t *string, const uint32_t
         rv - rendered bitmap in rv->data, actual sizes in the rest of members.
             rendered bitmap is RG_16UI format, R component is intensity, G component is index of
             UCS-2 codepoint in the string that caused the pixel to be rendered.
-            Value is not defined for zero intensity pixels.
+            Value is 0 for zero intensity pixels.
 
     return value: nonzero on error.
 */
