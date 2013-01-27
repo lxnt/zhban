@@ -193,6 +193,7 @@ static void shape_stuff(struct _half_zhban *half, zhban_item_t *item) {
     hb_buffer_set_script(half->hb_buffer, HB_SCRIPT_LATIN);
     //hb_buffer_set_language(half->hb_buffer, hb_language_from_string("en", 2));
     hb_buffer_add_utf16(half->hb_buffer, item->key, item->keysize/2, 0, item->keysize/2);
+    hb_shape(half->hb_font, half->hb_buffer, NULL, 0);
 
     spanner_baton_t stuffbaton;
 
