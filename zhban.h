@@ -53,21 +53,21 @@ extern_C_curly_opens
 #endif
 
 /* Thread safety:
-    Make a mutex/lock/whatever you want and supply lock|unlock/acquire|release 
+    Make a mutex/lock/whatever you want and supply lock|unlock/acquire|release
     wrappers to the zhb_init(). This will only be used by zhb_openface()/zhb_dropface().
-    
+
     zhb_fini() is obviosly not thread-safe.
-    
+
     Intended operation is for the zhb_face_t pointer to be shared between two threads,
-    one repeatedly calling zhb_stringrect(), doing layout, then somehow passing 
+    one repeatedly calling zhb_stringrect(), doing layout, then somehow passing
     resulting string and aux parameters (pixheight, pointheigh, w) to the other,
     which repeatedly calls zhb_stringtex(), doing the rendering.
-    
+
     Caches and all FreeType data is kept in two sets, each used only by one of the functions.
 
     A zhb_face_t structure can be safely shared between two threads only in the abovementioned
     manner.
-    
+
     Additional zhb_face_t structures can be used in additional thread pairs.
 */
 
@@ -85,7 +85,8 @@ typedef struct _zhban_rect {
     pixheight - desired line interval in pixels
     sizerlimit, renderlimit - cache limits in bytes, excluding uthash overhead.
 */
-ZHB_EXPORT zhban_t *zhban_open(const void *data, const uint32_t size, int pixheight, uint32_t sizerlimit, uint32_t renderlimit);
+ZHB_EXPORT zhban_t *zhban_open(const void *data, const uint32_t size, int pixheight,
+                                            uint32_t sizerlimit, uint32_t renderlimit);
 ZHB_EXPORT void zhban_drop(zhban_t *);
 
 /* returns expected size of bitmap for the string in rv. data pointed is NULL.
@@ -99,7 +100,8 @@ ZHB_EXPORT void zhban_drop(zhban_t *);
         rv - sizes
     return value - nonzero on error
 */
-ZHB_EXPORT int zhban_size(zhban_t *zhban, const uint16_t *string, const uint32_t strsize, zhban_rect_t *rv);
+ZHB_EXPORT int zhban_size(zhban_t *zhban, const uint16_t *string, const uint32_t strsize,
+                                                                            zhban_rect_t *rv);
 
 /* returns cached bitmap of the string in rv, read-only, subsequent calls invalidate data pointer.
    params:
@@ -107,15 +109,18 @@ ZHB_EXPORT int zhban_size(zhban_t *zhban, const uint16_t *string, const uint32_t
         face - which face to shape and render with
         string - UCS-2 string buffer
         strsize - string buffer size in bytes
-        w - renderer string width in pixels, previously returned by zhban_size() for this zhban and string
+        w - renderer string width in pixels, previously returned by zhban_size() for this zhban
+            and string
     out
         rv - rendered bitmap in rv->data, actual sizes in the rest of members.
-            rendered bitmap is RG_16UI format, R component is intensity, G component is index of UCS-2 codepoint in the string that
-            caused the pixel to be rendered. Value is not defined for zero intensity pixels.
+            rendered bitmap is RG_16UI format, R component is intensity, G component is index of
+            UCS-2 codepoint in the string that caused the pixel to be rendered.
+            Value is not defined for zero intensity pixels.
 
     return value: nonzero on error.
 */
-ZHB_EXPORT int zhban_render(zhban_t *zhban, const uint16_t *string, const uint32_t strsize, zhban_rect_t *rv);
+ZHB_EXPORT int zhban_render(zhban_t *zhban, const uint16_t *string, const uint32_t strsize,
+                                                                            zhban_rect_t *rv);
 
 
 #if defined(__cplusplus)
