@@ -86,7 +86,7 @@ ZHB_EXPORT zhban_t *zhban_open(const void *data, const uint32_t size, int pixhei
                                             uint32_t sizerlimit, uint32_t renderlimit);
 ZHB_EXPORT void zhban_drop(zhban_t *);
 
-/* returns expected size of bitmap for the string in rv. data pointed is NULL.
+/* returns expected size of bitmap for the string in rv. data pointer is NULL.
    params:
     in
         face - which face to size for
