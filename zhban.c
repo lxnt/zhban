@@ -246,7 +246,7 @@ static void shape_stuff(struct _half_zhban *half, zhban_item_t *item) {
         /* origin of the first glyph - inital pen position, whatever. */
         if (horizontal) {
             int offs = item->texrect.w * (item->texrect.h - item->texrect.baseline_offset - 1);
-            origin = stuffbaton.first_pixel + offs + item->texrect.baseline_shift;
+            origin = stuffbaton.first_pixel + offs - item->texrect.baseline_shift;
         } else {
             /* this is most probably wrong. */
             int offs = item->texrect.w * ( item->texrect.h - item->texrect.baseline_shift );
