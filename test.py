@@ -51,10 +51,13 @@ def drawsurf(renderer, surf, b = False):
 
 def main():
     win, lose = init()
-    z = Zhban(open(sys.argv[1], "rb").read(), 64, libpath = "build/")
-    s = z.size(sys.argv[2])
-    r = z.render(sys.argv[2], s)
-    #open("dump", "wb").write(r.data)
+    z = Zhban(open(sys.argv[1], "rb").read(), 64)
+    text = '\n'.join(sys.argv[2:])
+    print(text)
+    s = z.size(text)
+    r = z.render(text, s.copy())
+    print(s, r)
+    open("dump", "wb").write(r.data)
     data = bytes(bytearray(r.data))
     masks = list(sdlpixels.pixelformat_enum_to_masks(sdlpixels.SDL_PIXELFORMAT_ABGR8888))
     bpp = masks.pop(0)
