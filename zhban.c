@@ -203,11 +203,12 @@ void zhban_drop(zhban_t *zh) {
 }
 
 static void shape_stuff(struct _half_zhban *half, zhban_item_t *item) {
-    hb_buffer_clear(half->hb_buffer);
+    hb_buffer_clear_contents(half->hb_buffer);
     hb_buffer_set_direction(half->hb_buffer, HB_DIRECTION_LTR);
     hb_buffer_set_script(half->hb_buffer, HB_SCRIPT_LATIN);
     //hb_buffer_set_language(half->hb_buffer, hb_language_from_string("en", 2));
     hb_buffer_add_utf16(half->hb_buffer, item->key, item->keysize/2, 0, item->keysize/2);
+
     hb_shape(half->hb_font, half->hb_buffer, NULL, 0);
 
     spanner_baton_t stuffbaton;
@@ -218,7 +219,6 @@ static void shape_stuff(struct _half_zhban *half, zhban_item_t *item) {
     ftr_params.user = &stuffbaton;
     ftr_params.black_spans = 0;
     ftr_params.bit_set = 0;
-
     ftr_params.bit_test = 0;
     ftr_params.gray_spans = spanner;
 
