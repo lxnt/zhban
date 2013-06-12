@@ -14,6 +14,6 @@ cdef extern from "zhban.h":
     zhban_t *zhban_open(void *data, uint32_t size, int pixheight, uint32_t sizerlimit, uint32_t renderlimit)
     void zhban_drop(zhban_t *)
 
-    bint zhb_stringrect(zhban_t *z, uint16_t *string, uint32_t strsize, zhban_rect_t *rv)
-    bint zhb_stringtex(zhban_t *z, uint16_t *string, uint32_t strsize, zhban_rect_t *rv)
+    bint zhban_size(zhban_t *z, uint16_t *string, uint32_t strsize, zhban_rect_t *rv)
+    bint zhban_render(zhban_t *z, uint16_t *string, uint32_t strsize, zhban_rect_t *rv)
 

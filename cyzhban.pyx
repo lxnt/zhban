@@ -24,7 +24,7 @@ cdef class simprinter:
     cdef size(self, text):
         cdef Py_buffer buf
         PyObject_GetBuffer(text, &buf, PyBUF_CONTIG_RO)
-        fail = zhb_stringrect(self._zhban, <uint16_t *>buf.buf, buf.len, &self.sizer_rv)
+        fail = zhban_size(self._zhban, <uint16_t *>buf.buf, buf.len, &self.sizer_rv)
         PyBuffer_Release(&buf)
         if fail:
             raise SomeError
@@ -32,7 +32,7 @@ cdef class simprinter:
     cdef texture(self, text):
         cdef Py_buffer buf
         PyObject_GetBuffer(text, &buf, PyBUF_CONTIG_RO)
-        fail = zhb_stringtex(self._zhban, <uint16_t *>buf.buf, buf.len, &self.render_rv)
+        fail = zhban_render(self._zhban, <uint16_t *>buf.buf, buf.len, &self.render_rv)
         PyBuffer_Release(&buf)
 
         if fail:
