@@ -336,11 +336,11 @@ static int do_stuff(zhban_t *zhban, const uint16_t *string, const uint32_t strsi
     uint32_t itemsize;
 
     if (do_render) {
-        hz = &zhban->sizer;
-        itemsize = sizeof(zhban_item_t) + strsize;
-    } else {
         hz = &zhban->render;
         itemsize = sizeof(zhban_item_t) + strsize + rv->w * rv->h * 4;
+    } else {
+        hz = &zhban->sizer;
+        itemsize = sizeof(zhban_item_t) + strsize;
     }
 
     HASH_FIND(hh, hz->cache, string, strsize, item);
