@@ -3,6 +3,7 @@
 import os
 import sys
 import ctypes
+import codecs
 
 ctypes.pythonapi.PyBytes_FromStringAndSize.restype = ctypes.py_object
 
@@ -83,7 +84,7 @@ class Zhban(object):
     @staticmethod
     def _bufconv(ass):
         if type(ass) is str:
-            buf = ass.encode("utf-16")
+            buf = ass.encode("utf-16").lstrip(codecs.BOM_LE).lstrip(codecs.BOM_BE)
         elif type(ass) is bytes:
             buf = ass
         else:
