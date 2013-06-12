@@ -278,7 +278,7 @@ static void shape_stuff(struct _half_zhban *half, zhban_item_t *item) {
                 if (origin) {
                     /* origin of the glyph. */
                     stuffbaton.origin = origin + stuffbaton.pitch * gy + gx;
-                    stuffbaton.attribute = 0;
+                    stuffbaton.attribute = glyph_info[j].cluster;
                 }
 
                 if ((fterr = FT_Outline_Render(half->ft_lib, &half->ft_face->glyph->outline, &ftr_params)))
