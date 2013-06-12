@@ -21,6 +21,12 @@ class zhban_rect_t(ctypes.Structure):
     def data(self):
         return ctypes.pythonapi.PyBytes_FromStringAndSize(self._data, self.w*self.h*4)
 
+    def copy(self):
+        """ return a shallow copy; data pointer is set to NULL """
+        rv = zhban_rect_t.from_buffer_copy(self)
+        rv._data = None
+        return rv
+
 zhban_rect_t._fields_ = [
     ("_data", ctypes.c_void_p),
     ("w", ctypes.c_uint),
