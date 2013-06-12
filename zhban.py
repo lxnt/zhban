@@ -13,9 +13,10 @@ class zhban_t(ctypes.Structure):
     """ opaque, basically a face with associated caches and stuff """
 
 class zhban_rect_t(ctypes.Structure):
-    """ Bounding box bound to first glyph origin optionally with the render result """
+    """ Bounding box bound to the first glyph origin, optionally with the render result """
     def __repr__(self):
         return "zhban_rect_t(w={} h={} bo={} bs={})".format(self.w, self.h, self.baseline_offset, self.baseline_shift)
+
     @property
     def data(self):
         return ctypes.pythonapi.PyBytes_FromStringAndSize(self._data, self.w*self.h*4)
