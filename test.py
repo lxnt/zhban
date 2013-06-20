@@ -58,10 +58,13 @@ def main():
     r = z.render(text, s.copy())
     print(s, r)
     open("dump", "wb").write(r.data)
+    print("dumped.")
     data = bytes(bytearray(r.data))
     masks = list(sdlpixels.pixelformat_enum_to_masks(sdlpixels.SDL_PIXELFORMAT_ABGR8888))
+    #masks = list(sdlpixels.pixelformat_enum_to_masks(sdlpixels.SDL_PIXELFORMAT_RGBA8888))
     bpp = masks.pop(0)
     surf = sdlsurface.create_rgb_surface_from(data, r.w, r.h, bpp, r.w*4, *masks)
+    print(r.cluster_map)
     b = True
     while True:
         while True:

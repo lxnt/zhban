@@ -72,9 +72,9 @@ typedef struct _zhban zhban_t;
 
 typedef struct _zhban_rect {
     uint32_t *data; // RG_16UI of (intensity, index_in_source_string), or NULL. w*h*4 bytes.
+    uint32_t *cluster_map; // w cluster indices for background. go from glyph origin to next glyph origin.
     uint32_t w, h;
-    int32_t baseline_offset;
-    int32_t baseline_shift;
+    int32_t origin_x, origin_y;
 } zhban_rect_t;
 
 /* prepare to use a font face that FreeType2 can handle.
@@ -107,11 +107,13 @@ ZHB_EXPORT int zhban_size(zhban_t *zhban, const uint16_t *string, const uint32_t
         strsize - string buffer size in bytes
         w - renderer string width in pixels, previously returned by zhban_size() for this zhban
             and string
+        rv - result of previous sizing. rv->data is irrelevant, rv->{w,h,bs,bo} must be valid.
     out
-        rv - rendered bitmap in rv->data, actual sizes in the rest of members.
+        rv - rendered bitmap in rv->data.
             rendered bitmap is RG_16UI format, R component is intensity, G component is index of
             UCS-2 codepoint in the string that caused the pixel to be rendered.
             Value is 0 for zero intensity pixels.
+            Extra row (h -th) contains cluster(codepoint) index map
 
     return value: nonzero on error.
 */

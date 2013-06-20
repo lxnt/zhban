@@ -14,21 +14,30 @@ class zhban_t(ctypes.Structure):
 
 class zhban_rect_t(ctypes.Structure):
     """ Bounding box bound to the first glyph origin, optionally with the render result """
+    #0x{:016x} cluster_map=0x{:016x}
     def __repr__(self):
-        return "zhban_rect_t(w={} h={} bo={} bs={})".format(self.w, self.h, self.baseline_offset, self.baseline_shift)
+        return "zhban_rect_t(w={} h={} bo={} bs={} data={!r} cm={!r})".format(
+            self.w, self.h, self.baseline_offset, self.baseline_shift,
+            self._data, self._cluster_map)
 
     @property
     def data(self):
         return ctypes.pythonapi.PyBytes_FromStringAndSize(self._data, self.w*self.h*4)
 
+    @property
+    def cluster_map(self):
+        return ctypes.pythonapi.PyBytes_FromStringAndSize(self._cluster_map, self.w*4)
+
     def copy(self):
         """ return a shallow copy; data pointer is set to NULL """
         rv = zhban_rect_t.from_buffer_copy(self)
         rv._data = None
+        rv._cluster_map = None
         return rv
 
 zhban_rect_t._fields_ = [
     ("_data", ctypes.c_void_p),
+    ("_cluster_map", ctypes.c_void_p),
     ("w", ctypes.c_uint),
     ("h", ctypes.c_uint),
     ("baseline_offset", ctypes.c_int),
