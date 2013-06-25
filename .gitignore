@@ -1,0 +1,6 @@
+*.pyc
+*.html
+build/*
+cyzhban.c
+SciTEDirectory.properties
+
