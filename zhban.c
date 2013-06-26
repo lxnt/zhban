@@ -447,7 +447,7 @@ static void shape_stuff(struct _half_zhban *half, zhban_item_t *item) {
             int next_tab_pos = (x+1) % half->tab_step ? (x+1)/half->tab_step + 1 : (x+1)/half->tab_step;
             int tab_x_advance_px = next_tab_pos * half->tab_step - x;
             if (half->verbose)
-                printf("ate tab at %p [%ld]: %d px (x=%d ntp %d)\n", nextext, textlimit - nextext, 
+                printf("ate tab at %p [%d]: %d px (x=%d ntp %d)\n", nextext, (int)(textlimit - nextext),
                                                                     tab_x_advance_px, x, next_tab_pos);
             if (rendering) {
                 int tab_character_index = nextext - item->key;
