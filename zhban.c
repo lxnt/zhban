@@ -349,13 +349,15 @@ static void shape_stuff(struct _half_zhban *half, zhban_item_t *item) {
     uint16_t *nextext = text;
     const uint16_t *textlimit = item->key + item->key_size/2;
     uint32_t textlen;
+    int32_t cluster_offset; // number to add to glyph_info[j].cluster to arrive at correct value.
     if (half->verbose)
         printf("initial text %p textlimit %p \n", text, textlimit);
     while (textlimit - nextext > 0) {
         nextext = utf16chr(text, textlimit, '\t');
         textlen = nextext - text;
+        cluster_offset = text - item->key;
         if (half->verbose)
-            printf("sub: text %p nextext %p textlen %d\n", text, nextext, textlen);
+            printf("sub: text %p nextext %p textlen %d cluoffs %d\n", text, nextext, textlen, cluster_offset);
         /* shaping a substring: its pointer is in text, its length in textlen (characters) */
         if (textlen > 0) {
             hb_buffer_clear_contents(half->hb_buffer);
@@ -390,7 +392,7 @@ static void shape_stuff(struct _half_zhban *half, zhban_item_t *item) {
                         if (rendering) {
                             /* origin of the glyph. */
                             stuffbaton.origin = origin + stuffbaton.width * gy + gx;
-                            stuffbaton.attribute = glyph_info[j].cluster;
+                            stuffbaton.attribute = glyph_info[j].cluster + cluster_offset;
                         }
 
                         if ((fterr = FT_Outline_Render(half->ft_lib, &half->ft_face->glyph->outline, &ftr_params)))
