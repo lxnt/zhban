@@ -16,8 +16,9 @@ class zhban_rect_t(ctypes.Structure):
     """ Bounding box bound to the first glyph origin, optionally with the render result """
     #0x{:016x} cluster_map=0x{:016x}
     def __repr__(self):
-        return "zhban_rect_t(w={} h={} bo={} bs={} data={!r} cm={!r})".format(
-            self.w, self.h, self.baseline_offset, self.baseline_shift,
+        return "zhban_rect_t(at {!r} w={} h={} ox={} oy={} data={!r} cm={!r})".format(
+            ctypes.byref(self),
+            self.w, self.h, self.origin_x, self.origin_y,
             self._data, self._cluster_map)
 
     @property
@@ -38,10 +39,10 @@ class zhban_rect_t(ctypes.Structure):
 zhban_rect_t._fields_ = [
     ("_data", ctypes.c_void_p),
     ("_cluster_map", ctypes.c_void_p),
-    ("w", ctypes.c_uint),
-    ("h", ctypes.c_uint),
-    ("baseline_offset", ctypes.c_int),
-    ("baseline_shift", ctypes.c_int),
+    ("w", ctypes.c_int),
+    ("h", ctypes.c_int),
+    ("origin_x", ctypes.c_int),
+    ("origin_y", ctypes.c_int),
 ]
 
 def bind(libpath = None):
@@ -57,8 +58,10 @@ def bind(libpath = None):
     lib.zhban_open.argtypes = [ ctypes.c_void_p,        # data
                                 ctypes.c_uint,          # size
                                 ctypes.c_int,           # pixheight
+                                ctypes.c_int,           # tabstep
                                 ctypes.c_uint,          # sizerlimit
                                 ctypes.c_uint,          # renderlimit
+                                ctypes.c_int,           # log toggle
                                 ]
     lib.zhban_drop.restype = None
     lib.zhban_drop.argtypes = [ ctypes.POINTER(zhban_t) ]
@@ -85,7 +88,7 @@ class ZhbanFail(Exception):
     pass
 
 class Zhban(object):
-    def __init__(self, fontbuf, pixheight, szlim = 100500, rrlim = 100500, libpath = None):
+    def __init__(self, fontbuf, pixheight, tabstep = 0, szlim = 100500, rrlim = 100500, verbose = 0, libpath = None):
         self._s_rect = zhban_rect_t()
         self._r_rect = zhban_rect_t()
         if type(fontbuf) is bytes:
@@ -93,7 +96,7 @@ class Zhban(object):
         else:
             self._fbuf = bytes(fontbuf) # have to copy it.
         self._lib = bind(libpath)
-        self._z = self._lib.zhban_open(self._fbuf, len(self._fbuf), pixheight, szlim, rrlim)
+        self._z = self._lib.zhban_open(self._fbuf, len(self._fbuf), pixheight, tabstep, szlim, rrlim, verbose)
         if not bool(self._z):
             raise ZhbanFail
 
@@ -118,8 +121,8 @@ class Zhban(object):
         buf = self._bufconv(ass)
         self._r_rect.w = rect.w
         self._r_rect.h = rect.h
-        self._r_rect.baseline_offset = rect.baseline_offset
-        self._r_rect.baseline_shift = rect.baseline_shift
+        self._r_rect.origin_x = rect.origin_x
+        self._r_rect.origin_y = rect.origin_y
         rv = self._lib.zhban_render(self._z, buf, len(buf), ctypes.byref(self._r_rect))
         if rv != 0:
             raise ZhbanFail

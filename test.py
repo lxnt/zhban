@@ -52,19 +52,23 @@ def drawsurf(renderer, surf, b = False):
 def main():
     win, lose = init()
     z = Zhban(open(sys.argv[1], "rb").read(), 64)
-    text = '\n'.join(sys.argv[2:])
+    text = '\t'.join(sys.argv[2:])
     print(text)
     s = z.size(text)
+    print("sized rect {!r}".format(s))
     r = z.render(text, s.copy())
-    print(s, r)
-    open("dump", "wb").write(r.data)
-    print("dumped.")
+    print("rendered rect {!r}".format(r))
+    if True:
+        dump = open("dump", "wb")
+        dump.write(r.data)
+        dump.write(r.cluster_map)
+        print("dumped.")
+
     data = bytes(bytearray(r.data))
     masks = list(sdlpixels.pixelformat_enum_to_masks(sdlpixels.SDL_PIXELFORMAT_ABGR8888))
     #masks = list(sdlpixels.pixelformat_enum_to_masks(sdlpixels.SDL_PIXELFORMAT_RGBA8888))
     bpp = masks.pop(0)
     surf = sdlsurface.create_rgb_surface_from(data, r.w, r.h, bpp, r.w*4, *masks)
-    print(r.cluster_map)
     b = True
     while True:
         while True:

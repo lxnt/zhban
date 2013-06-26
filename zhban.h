@@ -73,17 +73,19 @@ typedef struct _zhban zhban_t;
 typedef struct _zhban_rect {
     uint32_t *data; // RG_16UI of (intensity, index_in_source_string), or NULL. w*h*4 bytes.
     uint32_t *cluster_map; // w cluster indices for background. go from glyph origin to next glyph origin.
-    uint32_t w, h;
+    int32_t w, h;
     int32_t origin_x, origin_y;
 } zhban_rect_t;
 
 /* prepare to use a font face that FreeType2 can handle.
     data, size - buffer with the font data (must not be freed or modified before drop() call)
     pixheight - desired line interval in pixels
+    tabstep - tabs skip to next multiple of this in pixels. value <= 0 uses emwidth of the font.
     sizerlimit, renderlimit - cache limits in bytes, excluding uthash overhead.
+    verbose - primitive log toggle. spams stdout when nonzero.
 */
-ZHB_EXPORT zhban_t *zhban_open(const void *data, const uint32_t size, int pixheight,
-                                            uint32_t sizerlimit, uint32_t renderlimit);
+ZHB_EXPORT zhban_t *zhban_open(const void *data, const uint32_t size, int pixheight, int tabstep,
+                                            uint32_t sizerlimit, uint32_t renderlimit, int verbose);
 ZHB_EXPORT void zhban_drop(zhban_t *);
 
 /* returns expected size of bitmap for the string in rv. data pointer is NULL.

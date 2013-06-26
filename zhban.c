@@ -39,13 +39,14 @@ typedef struct _spanner_baton {
     uint32_t *origin; // set to the glyph's origin. pixels are RG_16UI, so 32-bit. coords are GL/FT, not window (Y is up).
     uint32_t *first_pixel, *last_pixel; // bounds check
     uint16_t attribute; // per-glyph attribute (provoking character index ?)
-    uint32_t width; // width is in pixels.
+    int32_t width; // width is in pixels.
 
     int min_span_x;
     int max_span_x;
     int min_y;
     int max_y;
     int fail;
+    int verbose;
 } spanner_baton_t;
 
 static void spanner(int y, int count, const FT_Span* spans, void *user) {
@@ -79,15 +80,17 @@ static void spanner(int y, int count, const FT_Span* spans, void *user) {
                         t |= (attribute << 16) | coverage;
                         *start++ = t;
                     }
-                } else {
+                } else if (baton->verbose) {
                     printf("  error: span overflow\n");
                     printf("  span %d origin %p width %d (0x%x) scanline %p fp %p lp %p\n", i,
-                            baton->origin, baton->width, baton->width/4, scanline, baton->first_pixel, baton->last_pixel);
-                    printf("  span %d x=%d-%d y=%d start+len > last_pixel (%p + %d > %p).\n", i, spans[i].x, spans[i].x + spans[i].len, y,
-                        start, spans[i].len, baton->last_pixel);
+                                        baton->origin, baton->width, baton->width/4,
+                                        scanline, baton->first_pixel, baton->last_pixel);
+                    printf("  span %d x=%d-%d y=%d start+len > last_pixel (%p + %d > %p).\n", i,
+                                                        spans[i].x, spans[i].x + spans[i].len, y,
+                                                           start, spans[i].len, baton->last_pixel);
                     baton->fail = 1;
                 }
-            } else {
+            } else if (baton->verbose) {
                 printf("  error: scanline underflow\n");
                 printf("  span %d origin %p width %d (0x%x) scanline %p fp %p lp %p\n", i,
                         baton->origin, baton->width, baton->width/4, scanline, baton->first_pixel, baton->last_pixel);
@@ -138,6 +141,8 @@ struct _half_zhban {
 
     uint32_t cache_size;
     uint32_t cache_limit;
+    
+    int32_t tab_step;
 };
 
 struct _zhban {
@@ -145,7 +150,8 @@ struct _zhban {
     struct _half_zhban render;
 };
 
-static int open_half_zhban(struct _half_zhban *half, const void *data, const uint32_t datalen) {
+static int open_half_zhban(struct _half_zhban *half, const void *data, const uint32_t datalen,
+                                                            const uint32_t tab_step, int verbose) {
     if ((half->ft_err = FT_Init_FreeType(&half->ft_lib)))
         return 1;
 
@@ -157,6 +163,8 @@ static int open_half_zhban(struct _half_zhban *half, const void *data, const uin
 
     half->hb_font = hb_ft_font_create(half->ft_face, NULL);
     half->hb_buffer = hb_buffer_create();
+    half->tab_step = tab_step;
+    half->verbose = verbose;
     return 0;
 }
 
@@ -171,7 +179,8 @@ static void drop_half_zhban(struct _half_zhban *half) {
         FT_Done_FreeType(half->ft_lib);
 }
 
-zhban_t *zhban_open(const void *data, const uint32_t datalen, int pixheight, uint32_t sizerlimit, uint32_t renderlimit) {
+zhban_t *zhban_open(const void *data, const uint32_t datalen, int pixheight, int tab_step,
+                                        uint32_t sizerlimit, uint32_t renderlimit, int verbose) {
     zhban_t *rv = malloc(sizeof(zhban_t));
     if (!rv)
         return rv;
@@ -179,7 +188,8 @@ zhban_t *zhban_open(const void *data, const uint32_t datalen, int pixheight, uin
     memset(rv, 0, sizeof(zhban_t));
     rv->sizer.cache_limit = sizerlimit;
     rv->render.cache_limit = renderlimit;
-    if (open_half_zhban(&rv->sizer, data, datalen) || open_half_zhban(&rv->render, data, datalen))
+    if (   open_half_zhban(&rv->sizer, data, datalen, tab_step, verbose)
+        || open_half_zhban(&rv->render, data, datalen, tab_step, verbose))
         goto error;
 
     FT_Size_RequestRec szreq;
@@ -198,10 +208,11 @@ zhban_t *zhban_open(const void *data, const uint32_t datalen, int pixheight, uin
         i. e. even if ascender-descender == height in font units,
         in pixels that may not hold true. */
 
-    printf("FU: asc %08x dsc %08x h %08x delta %08x\n",
-        rv->sizer.ft_face->ascender, - rv->sizer.ft_face->descender,
-        rv->sizer.ft_face->height,
-        rv->sizer.ft_face->ascender - rv->sizer.ft_face->descender);
+    if (verbose)
+        printf("FU: asc %08x dsc %08x h %08x delta %08x\n",
+            rv->sizer.ft_face->ascender, - rv->sizer.ft_face->descender,
+            rv->sizer.ft_face->height,
+            rv->sizer.ft_face->ascender - rv->sizer.ft_face->descender);
 
     int req_size = pixheight, got_size, foo;;
     while(23) {
@@ -220,8 +231,9 @@ zhban_t *zhban_open(const void *data, const uint32_t datalen, int pixheight, uin
                         - rv->sizer.ft_face->size->metrics.descender) >> 6;
         foo = (rv->sizer.ft_face->size->metrics.ascender >> 6);
         foo -= (rv->sizer.ft_face->size->metrics.descender >> 6);
-        printf("sizereq %d, %d vs %d; h %d\n", req_size, got_size, foo,
-                             rv->sizer.ft_face->size->metrics.height >> 6);
+        if (verbose)
+            printf("sizereq %d, %d vs %d; h %ld\n", req_size, got_size, foo,
+                                 rv->sizer.ft_face->size->metrics.height >> 6);
         if (got_size <= pixheight)
             break;
         req_size -= 1;
@@ -229,19 +241,22 @@ zhban_t *zhban_open(const void *data, const uint32_t datalen, int pixheight, uin
     if ((rv->render.ft_err = FT_Request_Size(rv->render.ft_face, &szreq)))
         goto error;
 
+    if (tab_step <= 0)
+        tab_step = rv->sizer.ft_face->size->metrics.x_ppem;
+    
     rv->sizer.baseline_y = - (rv->sizer.ft_face->size->metrics.descender >> 6);
     rv->render.baseline_y = rv->sizer.baseline_y;
     rv->sizer.pixheight = pixheight;
     rv->render.pixheight = pixheight;
+    rv->sizer.tab_step = tab_step;
+    rv->render.tab_step = tab_step;
 
-    printf("sizer: asc %.2f desc %.2f height %.2f\n",
-        rv->sizer.ft_face->size->metrics.ascender / 64.0,
-        rv->sizer.ft_face->size->metrics.descender / 64.0,
-        rv->sizer.ft_face->size->metrics.height / 64.0);
-    printf("render: asc %d desc %d height %d\n",
-        rv->render.ft_face->size->metrics.ascender >> 6,
-        rv->render.ft_face->size->metrics.descender >> 6,
-        rv->render.ft_face->size->metrics.height >> 6 );
+    if (verbose)
+        printf("render: asc %ld desc %ld height %ld x_ppem %d\n",
+            rv->render.ft_face->size->metrics.ascender >> 6,
+            rv->render.ft_face->size->metrics.descender >> 6,
+            rv->render.ft_face->size->metrics.height >> 6,
+            rv->render.ft_face->size->metrics.x_ppem);
 
     return rv;
 
@@ -259,15 +274,16 @@ void zhban_drop(zhban_t *zh) {
     free(zh);
 }
 
+static uint16_t *utf16chr( uint16_t *hay, const uint16_t *haylimit, const uint16_t needle) {
+    uint16_t *ptr = hay;
+    while(haylimit - ptr > 0)
+        if (*ptr == needle)
+            return ptr;
+        else
+            ptr++;
+    return ptr;
+}
 static void shape_stuff(struct _half_zhban *half, zhban_item_t *item) {
-    hb_buffer_clear_contents(half->hb_buffer);
-    hb_buffer_set_direction(half->hb_buffer, HB_DIRECTION_LTR);
-    hb_buffer_set_script(half->hb_buffer, HB_SCRIPT_LATIN);
-    //hb_buffer_set_language(half->hb_buffer, hb_language_from_string("en", 2));
-    hb_buffer_add_utf16(half->hb_buffer, item->key, item->key_size/2, 0, item->key_size/2);
-
-    hb_shape(half->hb_font, half->hb_buffer, NULL, 0);
-
     spanner_baton_t stuffbaton;
 
     FT_Raster_Params ftr_params;
@@ -279,6 +295,12 @@ static void shape_stuff(struct _half_zhban *half, zhban_item_t *item) {
     ftr_params.bit_test = 0;
     ftr_params.gray_spans = spanner;
 
+    int x, y; // pen position.
+    //int horizontal = HB_DIRECTION_IS_HORIZONTAL(hb_buffer_get_direction(half->hb_buffer));
+    const int horizontal = 1;
+    uint32_t *origin = item->texrect.data;
+    int rendering = origin != NULL;
+
     int max_x = INT_MIN; // largest coordinate a pixel has been set at, or the pen was advanced to.
     int min_x = INT_MAX; // smallest coordinate a pixel has been set at, or the pen was advanced to.
     int max_y = INT_MIN; // this is max topside bearing along the string.
@@ -288,12 +310,8 @@ static void shape_stuff(struct _half_zhban *half, zhban_item_t *item) {
         However, their differences still make up the bounding box for the string.
         Also note that all this is in FT coordinate system where y axis points upwards.
      */
-
-    int x, y; // pen position.
-    int horizontal = HB_DIRECTION_IS_HORIZONTAL(hb_buffer_get_direction(half->hb_buffer));
-    uint32_t *origin = item->texrect.data;
-    int rendering = origin != NULL;
-
+    
+    stuffbaton.verbose = half->verbose;
     if (rendering) {
         memset(origin, 0, (item->texrect.w)*(item->texrect.h+1)*4);
         stuffbaton.width = item->texrect.w;
@@ -311,7 +329,8 @@ static void shape_stuff(struct _half_zhban *half, zhban_item_t *item) {
         /*  set initial pen position */
         x = item->texrect.origin_x;
         y = item->texrect.origin_y;
-
+        if (half->verbose)
+            printf("renderering into %dx%d %d,%d\n", item->texrect.w, item->texrect.h, x, y);
     } else {
         /* disable rendering */
         stuffbaton.origin = NULL;
@@ -319,79 +338,129 @@ static void shape_stuff(struct _half_zhban *half, zhban_item_t *item) {
         y = 0;
     }
 
-    uint32_t glyph_count;
-    hb_glyph_info_t     *glyph_info = hb_buffer_get_glyph_infos(half->hb_buffer, &glyph_count);
-    hb_glyph_position_t *glyph_pos  = hb_buffer_get_glyph_positions(half->hb_buffer, &glyph_count);
-    FT_Error fterr;
+    /* the idea is that the width of \t is (current_w extended to the next tabstop)-current_w 
+        where current_w is ...
+    
+        so we shape the next substring up until the next '\t', then add the '\t' width
+        to the current_x.
+    */
+    
+    uint16_t *text = item->key;
+    uint16_t *nextext = text;
+    const uint16_t *textlimit = item->key + item->key_size/2;
+    uint32_t textlen;
+    if (half->verbose)
+        printf("initial text %p textlimit %p \n", text, textlimit);
+    while (textlimit - nextext > 0) {
+        nextext = utf16chr(text, textlimit, '\t');
+        textlen = nextext - text;
+        if (half->verbose)
+            printf("sub: text %p nextext %p textlen %d\n", text, nextext, textlen);
+        /* shaping a substring: its pointer is in text, its length in textlen (characters) */
+        if (textlen > 0) {
+            hb_buffer_clear_contents(half->hb_buffer);
+            hb_buffer_set_direction(half->hb_buffer, HB_DIRECTION_LTR);
+            hb_buffer_set_script(half->hb_buffer, HB_SCRIPT_LATIN);
+            //hb_buffer_set_language(half->hb_buffer, hb_language_from_string("en", 2));
+            hb_buffer_add_utf16(half->hb_buffer, text, textlen, 0, textlen);
 
-    for (unsigned j = 0; j < glyph_count; ++j) {
-        if ((fterr = FT_Load_Glyph(half->ft_face, glyph_info[j].codepoint, 0))) {
-            printf("FT_Load_Glyph(%08x): fterr=0x%02x\n",  glyph_info[j].codepoint, fterr);
-        } else {
-            if (half->ft_face->glyph->format != FT_GLYPH_FORMAT_OUTLINE) {
-                printf("unexpected glyph->format = %4s\n", (char *)&half->ft_face->glyph->format);
-            } else {
-                int gx = x + (glyph_pos[j].x_offset/64);
-                int gy = y + (glyph_pos[j].y_offset/64);
+            hb_shape(half->hb_font, half->hb_buffer, NULL, 0);
 
-                stuffbaton.min_span_x = INT_MAX;
-                stuffbaton.max_span_x = INT_MIN;
-                stuffbaton.min_y = INT_MAX;
-                stuffbaton.max_y = INT_MIN;
-                stuffbaton.fail = 0;
+            uint32_t glyph_count;
+            hb_glyph_info_t     *glyph_info = hb_buffer_get_glyph_infos(half->hb_buffer, &glyph_count);
+            hb_glyph_position_t *glyph_pos  = hb_buffer_get_glyph_positions(half->hb_buffer, &glyph_count);
+            FT_Error fterr;
 
-                if (rendering) {
-                    /* origin of the glyph. */
-                    stuffbaton.origin = origin + stuffbaton.width * gy + gx;
-                    stuffbaton.attribute = glyph_info[j].cluster;
-                }
-
-                if ((fterr = FT_Outline_Render(half->ft_lib, &half->ft_face->glyph->outline, &ftr_params)))
-                    printf("FT_Outline_Render() fterr=0x%02x\n", fterr);
-
-                if (stuffbaton.min_span_x != INT_MAX) {
-                /* Update values if the spanner was actually called. */
-                    if (min_x > stuffbaton.min_span_x + gx)
-                        min_x = stuffbaton.min_span_x + gx;
-
-                    if (max_x < stuffbaton.max_span_x + gx)
-                        max_x = stuffbaton.max_span_x + gx;
-
-                    if (min_y > stuffbaton.min_y + gy)
-                        min_y = stuffbaton.min_y + gy;
-
-                    if (max_y < stuffbaton.max_y + gy)
-                        max_y = stuffbaton.max_y + gy;
+            for (unsigned j = 0; j < glyph_count; ++j) {
+                if ((fterr = FT_Load_Glyph(half->ft_face, glyph_info[j].codepoint, 0))) {
+                    printf("FT_Load_Glyph(%08x): fterr=0x%02x\n",  glyph_info[j].codepoint, fterr);
                 } else {
-                /* The spanner wasn't called at all - an empty glyph, like space. */
-                    if (min_x > gx) min_x = gx;
-                    if (max_x < gx) max_x = gx;
-                    if (min_y > gy) min_y = gy;
-                    if (max_y < gy) max_y = gy;
+                    if (half->ft_face->glyph->format != FT_GLYPH_FORMAT_OUTLINE) {
+                        printf("unexpected glyph->format = %4s\n", (char *)&half->ft_face->glyph->format);
+                    } else {
+                        int gx = x + (glyph_pos[j].x_offset/64);
+                        int gy = y + (glyph_pos[j].y_offset/64);
+
+                        stuffbaton.min_span_x = INT_MAX;
+                        stuffbaton.max_span_x = INT_MIN;
+                        stuffbaton.min_y = INT_MAX;
+                        stuffbaton.max_y = INT_MIN;
+                        stuffbaton.fail = 0;
+
+                        if (rendering) {
+                            /* origin of the glyph. */
+                            stuffbaton.origin = origin + stuffbaton.width * gy + gx;
+                            stuffbaton.attribute = glyph_info[j].cluster;
+                        }
+
+                        if ((fterr = FT_Outline_Render(half->ft_lib, &half->ft_face->glyph->outline, &ftr_params)))
+                            printf("FT_Outline_Render() fterr=0x%02x\n", fterr);
+
+                        if (stuffbaton.min_span_x != INT_MAX) {
+                        /* Update values if the spanner was actually called. */
+                            if (min_x > stuffbaton.min_span_x + gx)
+                                min_x = stuffbaton.min_span_x + gx;
+
+                            if (max_x < stuffbaton.max_span_x + gx)
+                                max_x = stuffbaton.max_span_x + gx;
+
+                            if (min_y > stuffbaton.min_y + gy)
+                                min_y = stuffbaton.min_y + gy;
+
+                            if (max_y < stuffbaton.max_y + gy)
+                                max_y = stuffbaton.max_y + gy;
+                        } else {
+                        /* The spanner wasn't called at all - an empty glyph, like space. */
+                            if (min_x > gx) min_x = gx;
+                            if (max_x < gx) max_x = gx;
+                            if (min_y > gy) min_y = gy;
+                            if (max_y < gy) max_y = gy;
+                        }
+                        if (stuffbaton.fail) {
+                            printf("fail at glyph %d cluster %d xy %d,%d gxy %d,%d x in [%d,%d] y in [%d,%d]\n\n",
+                                    j, glyph_info[j].cluster, x, y, gx, gy,
+                                    stuffbaton.min_span_x + gx, stuffbaton.max_span_x + gx,
+                                    stuffbaton.min_y + gy, stuffbaton.max_y + gy
+                                );
+                        }
+                    }
                 }
-                if (stuffbaton.fail) {
-                    printf("fail at glyph %d cluster %d xy %d,%d gxy %d,%d x in [%d,%d] y in [%d,%d]\n\n",
-                            j, glyph_info[j].cluster, x, y, gx, gy,
-                            stuffbaton.min_span_x + gx, stuffbaton.max_span_x + gx,
-                            stuffbaton.min_y + gy, stuffbaton.max_y + gy
-                        );
+
+                /* naive cluster map: just set from x+offset to x+offset+advance */
+                if (rendering) {
+                    int x_advance_px = glyph_pos[j].x_advance/64;
+                    //printf("glyph %d cluster 0x%08x x %d advance %d\n", j, glyph_info[j].cluster, x, x_advance_px);
+                    for (int cj = x; cj < x + x_advance_px; cj++)
+                        if (cj < item->texrect.w)
+                            item->texrect.cluster_map[cj] = glyph_info[j].cluster;
+                        else
+                            printf("cluster_map overflow by %d px\n", item->texrect.w - cj + 1);
                 }
+
+                x += glyph_pos[j].x_advance/64;
+                y += glyph_pos[j].y_advance/64;
             }
         }
-
-        /* naive cluster map: just set from x+offset to x+offset+advance */
-        if (rendering) {
-            int x_advance_px = glyph_pos[j].x_advance/64;
-            //printf("glyph %d cluster 0x%08x x %d advance %d\n", j, glyph_info[j].cluster, x, x_advance_px);
-            for (unsigned cj = x; cj < x + x_advance_px; cj++)
-                if (cj < item->texrect.w)
-                    item->texrect.cluster_map[cj] = glyph_info[j].cluster;
-                else
-                    printf("cluster_map overflow by %d px\n", item->texrect.w - cj + 1);
+        /* eat any tabs */
+        while ((textlimit - nextext > 0) && (*nextext == '\t')) {
+            /* x+1 ensures  any '\t' exactly at a tab pos works. */
+            int next_tab_pos = (x+1) % half->tab_step ? (x+1)/half->tab_step + 1 : (x+1)/half->tab_step;
+            int tab_x_advance_px = next_tab_pos * half->tab_step - x;
+            if (half->verbose)
+                printf("ate tab at %p [%ld]: %d px (x=%d ntp %d)\n", nextext, textlimit - nextext, 
+                                                                    tab_x_advance_px, x, next_tab_pos);
+            if (rendering) {
+                int tab_character_index = nextext - item->key;
+                for (int cj = x; cj < x + tab_x_advance_px; cj++)
+                    if (cj < item->texrect.w)
+                        item->texrect.cluster_map[cj] = tab_character_index;
+                    else
+                        printf("cluster_map overflow by %d px\n", item->texrect.w - cj + 1);
+            }
+            x += tab_x_advance_px;
+            nextext += 1;
         }
-
-        x += glyph_pos[j].x_advance/64;
-        y += glyph_pos[j].y_advance/64;
+        text = nextext;
     }
     if (1 || !rendering) { /* don't overwrite texrect values if we're rendering. */
         if (min_x > x) min_x = x;
@@ -502,7 +571,7 @@ static int do_stuff(zhban_t *zhban, const uint16_t *string, const uint32_t strsi
             item->texrect.origin_y = rv->origin_y;
         } else {
             if (item->texrect.data != NULL) {
-                printf("sizer cache contamination!\n");
+                printf("error: sizer cache contamination!\n");
             }
         }
 
