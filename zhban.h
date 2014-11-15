@@ -78,11 +78,11 @@ typedef struct _zhban_rect {
     int32_t origin_x, origin_y;
 } zhban_rect_t;
 
-#define ZHLOG_TRACE 1
-#define ZHLOG_INFO  2
+#define ZHLOG_TRACE 5
+#define ZHLOG_INFO  4
 #define ZHOGL_WARN  3
-#define ZHLOG_ERROR 4
-#define ZHOGL_FATAL 5
+#define ZHLOG_ERROR 2
+#define ZHOGL_FATAL 1
 typedef void (*logsink_t)(const int level, const char *fmt, va_list ap);
 
 /* prepare to use a font face that FreeType2 can handle.
@@ -122,7 +122,7 @@ ZHB_EXPORT int zhban_size(zhban_t *zhban, const uint16_t *string, const uint32_t
         rv - result of previous sizing. rv->data is irrelevant, rv->{w,h,bs,bo} must be valid.
     out
         rv - rendered bitmap in rv->data.
-            rendered bitmap is RG_16UI format, R component is intensity, G component is index of
+            rendered bitmap is GL_RG16UI format, R component is intensity, G component is index of
             UCS-2 codepoint in the string that caused the pixel to be rendered.
             Value is 0 for zero intensity pixels.
             Extra row (h -th) contains cluster(codepoint) index map
@@ -131,7 +131,6 @@ ZHB_EXPORT int zhban_size(zhban_t *zhban, const uint16_t *string, const uint32_t
 */
 ZHB_EXPORT int zhban_render(zhban_t *zhban, const uint16_t *string, const uint32_t strsize,
                                                                             zhban_rect_t *rv);
-
 
 #if defined(__cplusplus)
 #define extern_C_curly_closes }

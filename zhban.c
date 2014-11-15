@@ -36,7 +36,7 @@
 #include <hb.h>
 #include <hb-ft.h>
 
-const char *llname[] = { "fatal", "error", "warn ", "info ", "trace" };
+const char *llname[] = { "null", "fatal", "error", "warn ", "info ", "trace" };
 static void printfsink(const int level, const char *fmt, va_list ap) {
     fprintf(stderr, "[%s] ", llname[level < 0 ? 0 : (level > 5 ? 5: level)]);
     vfprintf(stderr, fmt, ap);
@@ -53,10 +53,10 @@ static void logrintf(int msg_level, int cur_level, logsink_t log_sink, const cha
 }
 
 #define log_trace(obj, fmt, args...) do { logrintf(ZHLOG_TRACE, (obj)->log_level, (obj)->log_sink, "%s(): " fmt, __func__, ## args); } while(0)
-#define log_info(obj, fmt, args...)  do { logrintf(ZHLOG_INFO,  (obj)->log_level, (obj)->log_sink, fmt, ## args); } while(0)
-#define log_warn(obj, fmt, args...)  do { logrintf(ZHLOG_WARN,  (obj)->log_level, (obj)->log_sink, fmt, ## args); } while(0)
-#define log_error(obj, fmt, args...) do { logrintf(ZHLOG_ERROR, (obj)->log_level, (obj)->log_sink, fmt, ## args); } while(0)
-#define log_fatal(obj, fmt, args...) do { logrintf(ZHLOG_FATAL, (obj)->log_level, (obj)->log_sink, fmt, ## args); } while(0)
+#define log_info(obj, fmt, args...)  do { logrintf(ZHLOG_INFO,  (obj)->log_level, (obj)->log_sink, "%s(): " fmt, __func__, ## args); } while(0)
+#define log_warn(obj, fmt, args...)  do { logrintf(ZHLOG_WARN,  (obj)->log_level, (obj)->log_sink, "%s(): " fmt, __func__, ## args); } while(0)
+#define log_error(obj, fmt, args...) do { logrintf(ZHLOG_ERROR, (obj)->log_level, (obj)->log_sink, "%s(): " fmt, __func__, ## args); } while(0)
+#define log_fatal(obj, fmt, args...) do { logrintf(ZHLOG_FATAL, (obj)->log_level, (obj)->log_sink, "%s(): " fmt, __func__, ## args); } while(0)
 
 typedef struct _spanner_baton {
     uint32_t *origin; // set to the glyph's origin. pixels are RG_16UI, so 32-bit. coords are GL/FT, not window (Y is up).
@@ -106,8 +106,6 @@ static void spanner(int y, int count, const FT_Span* spans, void *user) {
                     }
                 } else {
                     log_error(baton, "  error: span overflow");
-
-                    log_info(baton, "  error: span overflow");
                     log_info(baton, "  span %d origin %p width %d (0x%x) scanline %p fp %p lp %p", i,
                                         baton->origin, baton->width, baton->width/4,
                                         scanline, baton->first_pixel, baton->last_pixel);
@@ -529,7 +527,7 @@ static void shape_stuff(struct _half_zhban *half, zhban_item_t *item) {
             item->texrect.origin_y = half->baseline_y;
         }
 
-        log_error(half, "[%c] x [%d,%d] y [%d,%d] tmp_w=%d ori_x=%d tr = %d,%d %d,%d",
+        log_trace(half, "[%c] x [%d,%d] y [%d,%d] tmp_w=%d ori_x=%d tr = %d,%d %d,%d",
             rendering?'R':'S', min_x, max_x, min_y, max_y,
             tmp_w, ori_x,
             item->texrect.w, item->texrect.h,
