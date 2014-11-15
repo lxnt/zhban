@@ -1,6 +1,6 @@
 #!/usr/bin/python3.2
 
-import os, sys, ctypes, time
+import os, sys, ctypes, time, struct
 import pygame2
 
 _pgld = os.environ.get('PGLIBDIR', False)
@@ -21,6 +21,42 @@ from pygame2.sdl.video import SDL_Surface
 from pygame2.sdl.keycode import *
 
 from zhban import *
+
+colorset = (
+   (0xff, 0x00, 0x00),
+   (0x00, 0xff, 0x00),
+   (0x00, 0x00, 0xff),
+   (0x80, 0x00, 0x00),
+   (0x00, 0x80, 0x00),
+   (0x00, 0x00, 0x80),
+   (0x80, 0x80, 0x80),
+   (0xff, 0xff, 0x00),
+   (0x00, 0xff, 0xff),
+   (0xff, 0x00, 0xff),
+   (0xff, 0xff, 0x00),
+   (0x00, 0xff, 0xff),
+   (0xff, 0x00, 0xff),
+   (0xff, 0xff, 0xff),
+)
+
+def colorize(buf):
+    rv = bytearray(len(buf))
+    def iter_unpack(fmt, buf):
+        offs = 0
+        inc = struct.calcsize(fmt)
+        while offs < len(buf):
+            yv = struct.unpack_from(fmt, buf, offs)
+            offs += inc
+            yield yv
+    offs = 0
+    for alpha, cluster in iter_unpack("HH", buf):
+        color = colorset[cluster % len(colorset)]
+        if alpha > 0:
+            struct.pack_into("BBBB", rv, offs, color[0], color[1], color[2], alpha>>8)
+        else:
+            struct.pack_into("BBBB", rv, offs, 0, 0, 0, 0)
+        offs += 4
+    return bytes(rv)
 
 def init(size=(480, 320), title='zhban test', icon=None):
     #sdlhints.set_hint(SDL_HINT_RENDER_DRIVER, 'software')
@@ -53,7 +89,8 @@ def main():
     win, lose = init()
     z = Zhban(open(sys.argv[1], "rb").read(), 64, loglevel=5)
     text = '\t'.join(sys.argv[2:])
-    print(text)
+    text = open(sys.argv[2], 'rb').read().decode('utf-8')
+    #print(text)
     s = z.size(text)
     print("sized rect {!r}".format(s))
     r = z.render(text, s.copy())
@@ -64,7 +101,7 @@ def main():
         dump.write(r.cluster_map)
         print("dumped.")
 
-    data = bytes(bytearray(r.data))
+    data = colorize(r.data)
     masks = list(sdlpixels.pixelformat_enum_to_masks(sdlpixels.SDL_PIXELFORMAT_ABGR8888))
     #masks = list(sdlpixels.pixelformat_enum_to_masks(sdlpixels.SDL_PIXELFORMAT_RGBA8888))
     bpp = masks.pop(0)
