@@ -61,7 +61,8 @@ def bind(libpath = None):
                                 ctypes.c_int,           # tabstep
                                 ctypes.c_uint,          # sizerlimit
                                 ctypes.c_uint,          # renderlimit
-                                ctypes.c_int,           # log toggle
+                                ctypes.c_int,           # log level
+                                ctypes.c_void_p         # log sink
                                 ]
     lib.zhban_drop.restype = None
     lib.zhban_drop.argtypes = [ ctypes.POINTER(zhban_t) ]
@@ -88,7 +89,7 @@ class ZhbanFail(Exception):
     pass
 
 class Zhban(object):
-    def __init__(self, fontbuf, pixheight, tabstep = 0, szlim = 100500, rrlim = 100500, verbose = 0, libpath = None):
+    def __init__(self, fontbuf, pixheight, tabstep = 0, szlim = 100500, rrlim = 100500, loglevel = 0, libpath = None):
         self._s_rect = zhban_rect_t()
         self._r_rect = zhban_rect_t()
         if type(fontbuf) is bytes:
@@ -96,7 +97,7 @@ class Zhban(object):
         else:
             self._fbuf = bytes(fontbuf) # have to copy it.
         self._lib = bind(libpath)
-        self._z = self._lib.zhban_open(self._fbuf, len(self._fbuf), pixheight, tabstep, szlim, rrlim, verbose)
+        self._z = self._lib.zhban_open(self._fbuf, len(self._fbuf), pixheight, tabstep, szlim, rrlim, loglevel, 0)
         if not bool(self._z):
             raise ZhbanFail
 

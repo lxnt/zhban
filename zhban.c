@@ -21,6 +21,7 @@
 */
 
 #include <stdio.h>
+#include <stdarg.h>
 
 #include "zhban.h"
 
@@ -35,6 +36,28 @@
 #include <hb.h>
 #include <hb-ft.h>
 
+const char *llname[] = { "fatal", "error", "warn ", "info ", "trace" };
+static void printfsink(const int level, const char *fmt, va_list ap) {
+    fprintf(stderr, "[%s] ", llname[level < 0 ? 0 : (level > 5 ? 5: level)]);
+    vfprintf(stderr, fmt, ap);
+    fputc('\n', stderr);
+}
+
+static void logrintf(int msg_level, int cur_level, logsink_t log_sink, const char *fmt, ...) {
+    if (msg_level <= cur_level) {
+        va_list ap;
+        va_start(ap, fmt);
+        log_sink(msg_level, fmt, ap);
+        va_end(ap);
+    }
+}
+
+#define log_trace(obj, fmt, args...) do { logrintf(ZHLOG_TRACE, (obj)->log_level, (obj)->log_sink, "%s(): " fmt, __func__, ## args); } while(0)
+#define log_info(obj, fmt, args...)  do { logrintf(ZHLOG_INFO,  (obj)->log_level, (obj)->log_sink, fmt, ## args); } while(0)
+#define log_warn(obj, fmt, args...)  do { logrintf(ZHLOG_WARN,  (obj)->log_level, (obj)->log_sink, fmt, ## args); } while(0)
+#define log_error(obj, fmt, args...) do { logrintf(ZHLOG_ERROR, (obj)->log_level, (obj)->log_sink, fmt, ## args); } while(0)
+#define log_fatal(obj, fmt, args...) do { logrintf(ZHLOG_FATAL, (obj)->log_level, (obj)->log_sink, fmt, ## args); } while(0)
+
 typedef struct _spanner_baton {
     uint32_t *origin; // set to the glyph's origin. pixels are RG_16UI, so 32-bit. coords are GL/FT, not window (Y is up).
     uint32_t *first_pixel, *last_pixel; // bounds check
@@ -46,7 +69,8 @@ typedef struct _spanner_baton {
     int min_y;
     int max_y;
     int fail;
-    int verbose;
+    int log_level;
+    logsink_t log_sink;
 } spanner_baton_t;
 
 static void spanner(int y, int count, const FT_Span* spans, void *user) {
@@ -80,21 +104,24 @@ static void spanner(int y, int count, const FT_Span* spans, void *user) {
                         t |= (attribute << 16) | coverage;
                         *start++ = t;
                     }
-                } else if (baton->verbose) {
-                    printf("  error: span overflow\n");
-                    printf("  span %d origin %p width %d (0x%x) scanline %p fp %p lp %p\n", i,
+                } else {
+                    log_error(baton, "  error: span overflow");
+
+                    log_info(baton, "  error: span overflow");
+                    log_info(baton, "  span %d origin %p width %d (0x%x) scanline %p fp %p lp %p", i,
                                         baton->origin, baton->width, baton->width/4,
                                         scanline, baton->first_pixel, baton->last_pixel);
-                    printf("  span %d x=%d-%d y=%d start+len > last_pixel (%p + %d > %p).\n", i,
+                    log_info(baton, "  span %d x=%d-%d y=%d start+len > last_pixel (%p + %d > %p).", i,
                                                         spans[i].x, spans[i].x + spans[i].len, y,
                                                            start, spans[i].len, baton->last_pixel);
                     baton->fail = 1;
                 }
-            } else if (baton->verbose) {
-                printf("  error: scanline underflow\n");
-                printf("  span %d origin %p width %d (0x%x) scanline %p fp %p lp %p\n", i,
+            } else {
+                log_error(baton, "  error: scanline underflow");
+                log_info(baton, "  span %d origin %p width %d (0x%x) scanline %p fp %p lp %p", i,
                         baton->origin, baton->width, baton->width/4, scanline, baton->first_pixel, baton->last_pixel);
-                printf("  span %d x=%d-%d y=%d scanline < first_pixel.\n", i, spans[i].x, spans[i].x + spans[i].len, y);
+                log_info(baton, "  span %d x=%d-%d y=%d scanline < first_pixel.", i,
+                        spans[i].x, spans[i].x + spans[i].len, y);
                 baton->fail = 1;
             }
         }
@@ -125,9 +152,11 @@ typedef struct _zhban_item {
 } zhban_item_t;
 
 struct _half_zhban {
+    int32_t log_level;
+    logsink_t log_sink;
+
     int pixheight;
     int baseline_y; // well. let baseline be descent pixels above the bitmap bottom.
-    int verbose;
 
     FT_Library ft_lib;
     FT_Face ft_face;
@@ -151,7 +180,7 @@ struct _zhban {
 };
 
 static int open_half_zhban(struct _half_zhban *half, const void *data, const uint32_t datalen,
-                                                            const uint32_t tab_step, int verbose) {
+                                        const uint32_t tab_step, int32_t loglevel, logsink_t logsink) {
     if ((half->ft_err = FT_Init_FreeType(&half->ft_lib)))
         return 1;
 
@@ -164,7 +193,8 @@ static int open_half_zhban(struct _half_zhban *half, const void *data, const uin
     half->hb_font = hb_ft_font_create(half->ft_face, NULL);
     half->hb_buffer = hb_buffer_create();
     half->tab_step = tab_step;
-    half->verbose = verbose;
+    half->log_level = loglevel;
+    half->log_sink = logsink;
     return 0;
 }
 
@@ -179,8 +209,10 @@ static void drop_half_zhban(struct _half_zhban *half) {
         FT_Done_FreeType(half->ft_lib);
 }
 
+
 zhban_t *zhban_open(const void *data, const uint32_t datalen, int pixheight, int tab_step,
-                                        uint32_t sizerlimit, uint32_t renderlimit, int verbose) {
+                                        uint32_t sizerlimit, uint32_t renderlimit,
+                                        int32_t loglevel, logsink_t logsink) {
     zhban_t *rv = malloc(sizeof(zhban_t));
     if (!rv)
         return rv;
@@ -188,8 +220,8 @@ zhban_t *zhban_open(const void *data, const uint32_t datalen, int pixheight, int
     memset(rv, 0, sizeof(zhban_t));
     rv->sizer.cache_limit = sizerlimit;
     rv->render.cache_limit = renderlimit;
-    if (   open_half_zhban(&rv->sizer, data, datalen, tab_step, verbose)
-        || open_half_zhban(&rv->render, data, datalen, tab_step, verbose))
+    if (   open_half_zhban(&rv->sizer, data, datalen, tab_step, loglevel, logsink ? logsink : printfsink)
+        || open_half_zhban(&rv->render, data, datalen, tab_step, loglevel, logsink ? logsink : printfsink))
         goto error;
 
     FT_Size_RequestRec szreq;
@@ -208,8 +240,7 @@ zhban_t *zhban_open(const void *data, const uint32_t datalen, int pixheight, int
         i. e. even if ascender-descender == height in font units,
         in pixels that may not hold true. */
 
-    if (verbose)
-        printf("FU: asc %08x dsc %08x h %08x delta %08x\n",
+    log_trace(&rv->sizer, "Font units: asc %08x dsc %08x h %08x delta %08x",
             rv->sizer.ft_face->ascender, - rv->sizer.ft_face->descender,
             rv->sizer.ft_face->height,
             rv->sizer.ft_face->ascender - rv->sizer.ft_face->descender);
@@ -231,8 +262,7 @@ zhban_t *zhban_open(const void *data, const uint32_t datalen, int pixheight, int
                         - rv->sizer.ft_face->size->metrics.descender) >> 6;
         foo = (rv->sizer.ft_face->size->metrics.ascender >> 6);
         foo -= (rv->sizer.ft_face->size->metrics.descender >> 6);
-        if (verbose)
-            printf("sizereq %d, %d vs %d; h %ld\n", req_size, got_size, foo,
+        log_trace(&rv->sizer, "sizereq %d, %d vs %d; h %ld", req_size, got_size, foo,
                                  rv->sizer.ft_face->size->metrics.height >> 6);
         if (got_size <= pixheight)
             break;
@@ -251,8 +281,7 @@ zhban_t *zhban_open(const void *data, const uint32_t datalen, int pixheight, int
     rv->sizer.tab_step = tab_step;
     rv->render.tab_step = tab_step;
 
-    if (verbose)
-        printf("render: asc %ld desc %ld height %ld x_ppem %d\n",
+    log_info(&rv->render, "render: asc %ld desc %ld height %ld x_ppem %d",
             rv->render.ft_face->size->metrics.ascender >> 6,
             rv->render.ft_face->size->metrics.descender >> 6,
             rv->render.ft_face->size->metrics.height >> 6,
@@ -261,7 +290,8 @@ zhban_t *zhban_open(const void *data, const uint32_t datalen, int pixheight, int
     return rv;
 
     error:
-    printf("zhban_open(): sizer FT_Err=0x%02X render FT_Err=0x%02X\n", rv->sizer.ft_err, rv->render.ft_err);
+    log_error(&rv->sizer, "zhban_open(): sizer FT_Err=0x%02X render FT_Err=0x%02X",
+                                                rv->sizer.ft_err, rv->render.ft_err);
     drop_half_zhban(&rv->render);
     drop_half_zhban(&rv->sizer);
     free(rv);
@@ -283,8 +313,12 @@ static uint16_t *utf16chr( uint16_t *hay, const uint16_t *haylimit, const uint16
             ptr++;
     return ptr;
 }
+
 static void shape_stuff(struct _half_zhban *half, zhban_item_t *item) {
     spanner_baton_t stuffbaton;
+
+    stuffbaton.log_level = half->log_level;
+    stuffbaton.log_sink = half->log_sink;
 
     FT_Raster_Params ftr_params;
     ftr_params.target = 0;
@@ -311,7 +345,6 @@ static void shape_stuff(struct _half_zhban *half, zhban_item_t *item) {
         Also note that all this is in FT coordinate system where y axis points upwards.
      */
     
-    stuffbaton.verbose = half->verbose;
     if (rendering) {
         memset(origin, 0, (item->texrect.w)*(item->texrect.h+1)*4);
         stuffbaton.width = item->texrect.w;
@@ -324,13 +357,13 @@ static void shape_stuff(struct _half_zhban *half, zhban_item_t *item) {
             origin = stuffbaton.first_pixel;// + offs - item->texrect.baseline_shift;
             item->texrect.cluster_map = item->texrect.data + item->texrect.w * item->texrect.h;
         } else {
-            printf("error: non-horizontal scripts are not supported.\n");
+            log_error(half, "error: non-horizontal scripts are not supported.");
         }
         /*  set initial pen position */
         x = item->texrect.origin_x;
         y = item->texrect.origin_y;
-        if (half->verbose)
-            printf("renderering into %dx%d %d,%d\n", item->texrect.w, item->texrect.h, x, y);
+
+        log_trace(half, "renderering into %dx%d %d,%d", item->texrect.w, item->texrect.h, x, y);
     } else {
         /* disable rendering */
         stuffbaton.origin = NULL;
@@ -350,14 +383,12 @@ static void shape_stuff(struct _half_zhban *half, zhban_item_t *item) {
     const uint16_t *textlimit = item->key + item->key_size/2;
     uint32_t textlen;
     int32_t cluster_offset; // number to add to glyph_info[j].cluster to arrive at correct value.
-    if (half->verbose)
-        printf("initial text %p textlimit %p \n", text, textlimit);
+    log_trace(half, "initial text %p textlimit %p", text, textlimit);
     while (textlimit - nextext > 0) {
         nextext = utf16chr(text, textlimit, '\t');
         textlen = nextext - text;
         cluster_offset = text - item->key;
-        if (half->verbose)
-            printf("sub: text %p nextext %p textlen %d cluoffs %d\n", text, nextext, textlen, cluster_offset);
+        log_trace(half, "sub: text %p nextext %p textlen %d cluoffs %d", text, nextext, textlen, cluster_offset);
         /* shaping a substring: its pointer is in text, its length in textlen (characters) */
         if (textlen > 0) {
             hb_buffer_clear_contents(half->hb_buffer);
@@ -375,10 +406,10 @@ static void shape_stuff(struct _half_zhban *half, zhban_item_t *item) {
 
             for (unsigned j = 0; j < glyph_count; ++j) {
                 if ((fterr = FT_Load_Glyph(half->ft_face, glyph_info[j].codepoint, 0))) {
-                    printf("FT_Load_Glyph(%08x): fterr=0x%02x\n",  glyph_info[j].codepoint, fterr);
+                    log_error(half, "FT_Load_Glyph(%08x): fterr=0x%02x",  glyph_info[j].codepoint, fterr);
                 } else {
                     if (half->ft_face->glyph->format != FT_GLYPH_FORMAT_OUTLINE) {
-                        printf("unexpected glyph->format = %4s\n", (char *)&half->ft_face->glyph->format);
+                        log_error(half, "unexpected glyph->format = %4s", (char *)&half->ft_face->glyph->format);
                     } else {
                         int gx = x + (glyph_pos[j].x_offset/64);
                         int gy = y + (glyph_pos[j].y_offset/64);
@@ -396,7 +427,7 @@ static void shape_stuff(struct _half_zhban *half, zhban_item_t *item) {
                         }
 
                         if ((fterr = FT_Outline_Render(half->ft_lib, &half->ft_face->glyph->outline, &ftr_params)))
-                            printf("FT_Outline_Render() fterr=0x%02x\n", fterr);
+                            log_error(half, "FT_Outline_Render() fterr=0x%02x", fterr);
 
                         if (stuffbaton.min_span_x != INT_MAX) {
                         /* Update values if the spanner was actually called. */
@@ -419,7 +450,7 @@ static void shape_stuff(struct _half_zhban *half, zhban_item_t *item) {
                             if (max_y < gy) max_y = gy;
                         }
                         if (stuffbaton.fail) {
-                            printf("fail at glyph %d cluster %d xy %d,%d gxy %d,%d x in [%d,%d] y in [%d,%d]\n\n",
+                            log_error(half, "fail at glyph %d cluster %d xy %d,%d gxy %d,%d x in [%d,%d] y in [%d,%d]",
                                     j, glyph_info[j].cluster, x, y, gx, gy,
                                     stuffbaton.min_span_x + gx, stuffbaton.max_span_x + gx,
                                     stuffbaton.min_y + gy, stuffbaton.max_y + gy
@@ -431,12 +462,12 @@ static void shape_stuff(struct _half_zhban *half, zhban_item_t *item) {
                 /* naive cluster map: just set from x+offset to x+offset+advance */
                 if (rendering) {
                     int x_advance_px = glyph_pos[j].x_advance/64;
-                    //printf("glyph %d cluster 0x%08x x %d advance %d\n", j, glyph_info[j].cluster, x, x_advance_px);
+                    log_trace(half, "glyph %d cluster 0x%08x x %d advance %d", j, glyph_info[j].cluster, x, x_advance_px);
                     for (int cj = x; cj < x + x_advance_px; cj++)
                         if (cj < item->texrect.w)
                             item->texrect.cluster_map[cj] = glyph_info[j].cluster;
                         else
-                            printf("cluster_map overflow by %d px\n", item->texrect.w - cj + 1);
+                            log_error(half, "cluster_map overflow by %d px", item->texrect.w - cj + 1);
                 }
 
                 x += glyph_pos[j].x_advance/64;
@@ -448,8 +479,7 @@ static void shape_stuff(struct _half_zhban *half, zhban_item_t *item) {
             /* x+1 ensures  any '\t' exactly at a tab pos works. */
             int next_tab_pos = (x+1) % half->tab_step ? (x+1)/half->tab_step + 1 : (x+1)/half->tab_step;
             int tab_x_advance_px = next_tab_pos * half->tab_step - x;
-            if (half->verbose)
-                printf("ate tab at %p [%d]: %d px (x=%d ntp %d)\n", nextext, (int)(textlimit - nextext),
+            log_trace(half, "ate tab at %p [%d]: %d px (x=%d ntp %d)", nextext, (int)(textlimit - nextext),
                                                                     tab_x_advance_px, x, next_tab_pos);
             if (rendering) {
                 int tab_character_index = nextext - item->key;
@@ -457,7 +487,7 @@ static void shape_stuff(struct _half_zhban *half, zhban_item_t *item) {
                     if (cj < item->texrect.w)
                         item->texrect.cluster_map[cj] = tab_character_index;
                     else
-                        printf("cluster_map overflow by %d px\n", item->texrect.w - cj + 1);
+                        log_error(half, "cluster_map overflow by %d px", item->texrect.w - cj + 1);
             }
             x += tab_x_advance_px;
             nextext += 1;
@@ -499,16 +529,14 @@ static void shape_stuff(struct _half_zhban *half, zhban_item_t *item) {
             item->texrect.origin_y = half->baseline_y;
         }
 
-        if (half->verbose) {
-            printf("[%c] x [%d,%d] y [%d,%d] tmp_w=%d ori_x=%d tr = %d,%d %d,%d\n",
-                rendering?'R':'S', min_x, max_x, min_y, max_y,
-                tmp_w, ori_x,
-                item->texrect.w, item->texrect.h,
-                item->texrect.origin_x, item->texrect.origin_y);
-        }
+        log_error(half, "[%c] x [%d,%d] y [%d,%d] tmp_w=%d ori_x=%d tr = %d,%d %d,%d",
+            rendering?'R':'S', min_x, max_x, min_y, max_y,
+            tmp_w, ori_x,
+            item->texrect.w, item->texrect.h,
+            item->texrect.origin_x, item->texrect.origin_y);
 
         if (rendering && (tmp_w != item->texrect.w))
-            printf("error: resetting item->texrect.w %d -> %d\n", item->texrect.w, tmp_w);
+            log_error(half, "error: resetting item->texrect.w %d -> %d", item->texrect.w, tmp_w);
     }
 }
 
@@ -573,7 +601,7 @@ static int do_stuff(zhban_t *zhban, const uint16_t *string, const uint32_t strsi
             item->texrect.origin_y = rv->origin_y;
         } else {
             if (item->texrect.data != NULL) {
-                printf("error: sizer cache contamination!\n");
+                log_error(hz, "error: sizer cache contamination!");
             }
         }
 

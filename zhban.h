@@ -51,6 +51,7 @@
 extern_C_curly_opens
 #endif
 
+#include <stdarg.h>
 #include <stdint.h>
 
 #if defined(__GNUC__)
@@ -77,6 +78,13 @@ typedef struct _zhban_rect {
     int32_t origin_x, origin_y;
 } zhban_rect_t;
 
+#define ZHLOG_TRACE 1
+#define ZHLOG_INFO  2
+#define ZHOGL_WARN  3
+#define ZHLOG_ERROR 4
+#define ZHOGL_FATAL 5
+typedef void (*logsink_t)(const int level, const char *fmt, va_list ap);
+
 /* prepare to use a font face that FreeType2 can handle.
     data, size - buffer with the font data (must not be freed or modified before drop() call)
     pixheight - desired line interval in pixels
@@ -84,8 +92,10 @@ typedef struct _zhban_rect {
     sizerlimit, renderlimit - cache limits in bytes, excluding uthash overhead.
     verbose - primitive log toggle. spams stdout when nonzero.
 */
-ZHB_EXPORT zhban_t *zhban_open(const void *data, const uint32_t size, int pixheight, int tabstep,
-                                            uint32_t sizerlimit, uint32_t renderlimit, int verbose);
+ZHB_EXPORT zhban_t *zhban_open(const void *data, const uint32_t size,
+                                            int pixheight, int tabstep,
+                                            uint32_t sizerlimit, uint32_t renderlimit,
+                                            int llevel, logsink_t lsink);
 ZHB_EXPORT void zhban_drop(zhban_t *);
 
 /* returns expected size of bitmap for the string in rv. data pointer is NULL.

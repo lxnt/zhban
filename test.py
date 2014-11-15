@@ -51,7 +51,7 @@ def drawsurf(renderer, surf, b = False):
 
 def main():
     win, lose = init()
-    z = Zhban(open(sys.argv[1], "rb").read(), 64)
+    z = Zhban(open(sys.argv[1], "rb").read(), 64, loglevel=5)
     text = '\t'.join(sys.argv[2:])
     print(text)
     s = z.size(text)
