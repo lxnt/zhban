@@ -163,12 +163,6 @@ ZHB_EXPORT size_t zhban_8len(uint8_t *s, uint32_t *errors_ptr);
 ZHB_EXPORT uint32_t zhban_8to16(uint8_t *src, uint32_t srcsize, uint16_t *dst, uint32_t dstsize);
 ZHB_EXPORT uint32_t zhban_16to8(uint16_t *src, uint32_t srcsize, uint8_t *dst, uint32_t dstsize);
 
-/* what is this shite */
-ZHB_EXPORT uint32_t zhban_wordcount(uint16_t *src, uint32_t srcsize);
-
-/* attempt at text reflow */
-ZHB_EXPORT uint32_t zhban_flow_text(zhban_t *zhban, uint16_t *text, uint32_t textsize,
-        uint32_t width, uint32_t height, uint32_t linestep, zhban_bitmap_t **results, uint32_t *bitmap_count);
 
 #if defined(__cplusplus)
 #define extern_C_curly_closes }
