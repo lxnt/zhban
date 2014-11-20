@@ -651,15 +651,6 @@ static void adjust_glyph_origin(shape_t *dst, hb_position_t delta_x, hb_position
 }
 //}
 //{ shaper
-static uint16_t *utf16chr( uint16_t *hay, const uint16_t *haylimit, const uint16_t needle) {
-    uint16_t *ptr = hay;
-    while(haylimit - ptr > 0)
-        if (*ptr == needle)
-            return ptr;
-        else
-            ptr++;
-    return ptr;
-}
 static inline int32_t grid_fit_266(int32_t value) {
     return (value > 0) ?
             ((value>>6) + (value & 0x3f ? 1 : 0)) :
@@ -682,66 +673,50 @@ static void shape_string(zhban_internal_t *z, shape_t *item) {
 
     item->glyphs_used = 0; // reset glyph info/position storage
 
-    uint16_t *text = item->key;
-    uint16_t *nextext = text;
-    const uint16_t *textlimit = item->key + item->key_size/2;
-    uint32_t textlen;
-    int32_t cluster_offset; // number to add to glyph_info[j].cluster to arrive at correct value.
-    //log_trace(z, "initial text %p textlimit %p '%s'", text, textlimit, utf16to8(item->key, item->key_size));
-    while (textlimit - nextext > 0) {
-        nextext = utf16chr(text, textlimit, '\t');
-        textlen = nextext - text;
-        cluster_offset = text - item->key;
-        log_trace(z, "substring: text %p nextext %p textlen %d cluoffs %d", text, nextext, textlen, cluster_offset);
-        /* shaping a substring: its pointer is in text, its length in textlen (characters) */
-        if (textlen > 0) {
-            hb_buffer_clear_contents(z->hb_buffer);
-            hb_buffer_set_direction(z->hb_buffer, HB_DIRECTION_LTR);
-            //hb_buffer_set_script(z->hb_buffer, HB_SCRIPT_LATIN);
-            //hb_buffer_set_language(z->hb_buffer, hb_language_from_string("en", 2));
-            hb_buffer_add_utf16(z->hb_buffer, text, textlen, 0, textlen);
+    hb_buffer_clear_contents(z->hb_buffer);
+    hb_buffer_set_direction(z->hb_buffer, HB_DIRECTION_LTR);
+    //hb_buffer_set_script(z->hb_buffer, HB_SCRIPT_LATIN);
+    //hb_buffer_set_language(z->hb_buffer, hb_language_from_string("en", 2));
+    hb_buffer_add_utf16(z->hb_buffer, item->key, item->key_size/2, 0, item->key_size/2);
 
-            hb_shape(z->hb_font, z->hb_buffer, NULL, 0);
+    hb_shape(z->hb_font, z->hb_buffer, NULL, 0);
 
-            uint32_t glyph_count;
-            hb_glyph_info_t     *glyph_info = hb_buffer_get_glyph_infos(z->hb_buffer, &glyph_count);
-            hb_glyph_position_t *glyph_pos  = hb_buffer_get_glyph_positions(z->hb_buffer, &glyph_count);
+    uint32_t glyph_count;
+    hb_glyph_info_t     *glyph_info = hb_buffer_get_glyph_infos(z->hb_buffer, &glyph_count);
+    hb_glyph_position_t *glyph_pos  = hb_buffer_get_glyph_positions(z->hb_buffer, &glyph_count);
 
-            for (uint32_t j = 0; j < glyph_count; ++j) {
-                int32_t gx = x + glyph_pos[j].x_offset;
-                int32_t gy = y + glyph_pos[j].y_offset;
-                glyph_t *glyph = get_a_glyph(z, glyph_info[j].codepoint, gx & 0x3f, gy & 0x3f);
-                if (glyph) {
-                    if (glyph->min_span_x != INT_MAX) {
-                    /* Update values if the spanner was actually called. */
-                        if (min_x > (glyph->min_span_x<<6) + gx)
-                            min_x = (glyph->min_span_x<<6) + gx;
+    for (uint32_t j = 0; j < glyph_count; ++j) {
+        int32_t gx = x + glyph_pos[j].x_offset;
+        int32_t gy = y + glyph_pos[j].y_offset;
+        glyph_t *glyph = get_a_glyph(z, glyph_info[j].codepoint, gx & 0x3f, gy & 0x3f);
+        if (glyph) {
+            if (glyph->min_span_x != INT_MAX) {
+            /* Update values if the spanner was actually called. */
+                if (min_x > (glyph->min_span_x<<6) + gx)
+                    min_x = (glyph->min_span_x<<6) + gx;
 
-                        if (max_x < (glyph->max_span_x<<6) + gx)
-                            max_x = (glyph->max_span_x<<6) + gx;
+                if (max_x < (glyph->max_span_x<<6) + gx)
+                    max_x = (glyph->max_span_x<<6) + gx;
 
-                        if (min_y > (glyph->min_y<<6) + gy)
-                            min_y = (glyph->min_y<<6) + gy;
+                if (min_y > (glyph->min_y<<6) + gy)
+                    min_y = (glyph->min_y<<6) + gy;
 
-                        if (max_y < (glyph->max_y<<6) + gy)
-                            max_y = (glyph->max_y<<6) + gy;
-                    } else {
-                    /* The spanner wasn't called at all - an empty glyph, like space. */
-                        if (min_x > gx) min_x = gx;
-                        if (max_x < gx) max_x = gx;
-                        if (min_y > gy) min_y = gy;
-                        if (max_y < gy) max_y = gy;
-                        log_trace(z, "glyph %d: empty.", j); /* can't skip rendering it though? */
-                    }
-                    add_glyph_info(item, glyph, gx, gy, cluster_offset + glyph_info[j].cluster);
-                    log_trace(z, "glyph %d at %d.%d, %d.%d", j,
-                        gx>>6, 100*abs(gx&0x3f)/64, gy>>6, 100*abs(gy&0x3f)/64);
-                } /* else render_glyph() failed, skip it */
-                x += glyph_pos[j].x_advance;
-                y += glyph_pos[j].y_advance;
+                if (max_y < (glyph->max_y<<6) + gy)
+                    max_y = (glyph->max_y<<6) + gy;
+            } else {
+            /* The spanner wasn't called at all - an empty glyph, like space. */
+                if (min_x > gx) min_x = gx;
+                if (max_x < gx) max_x = gx;
+                if (min_y > gy) min_y = gy;
+                if (max_y < gy) max_y = gy;
+                log_trace(z, "glyph %d: empty.", j); /* can't skip rendering it though? */
             }
-        }
-        text = nextext;
+            add_glyph_info(item, glyph, gx, gy, glyph_info[j].cluster);
+            log_trace(z, "glyph %d at %d.%d, %d.%d", j,
+                gx>>6, 100*abs(gx&0x3f)/64, gy>>6, 100*abs(gy&0x3f)/64);
+        } /* else render_glyph() failed, skip it */
+        x += glyph_pos[j].x_advance;
+        y += glyph_pos[j].y_advance;
     }
 
     if (min_x > x) min_x = x;
@@ -752,39 +727,6 @@ static void shape_string(zhban_internal_t *z, shape_t *item) {
     log_trace(z, "extents: x [%d.%d, %d.%d] y [%d.%d, %d.%d]",
             min_x>>6, 100*abs(min_x &0x3f)/64, max_x>>6, 100*abs(max_x &0x3f)/64,
             min_y>>6, 100*abs(min_y & 0x3f)/64, max_y>>6, 100*abs(max_y & 0x3f)/64);
-
-    /* for horizontal :
-        int baseline_offset = horizontal ? max_y : min_x;
-        int baseline_shift = horizontal ? min_x : max_y;
-
-        baseline_offset - offset of pen starting point on x axis for horizontal scripts.
-
-        if baseline_offset is negative, we set origin_x to
-            its negation to compensate at render
-            and expand the width accordingly.
-        if it is positive or zero, we set origin_x to zero.
-
-        baseline_shift - topmost pixel y coordinate. since we define bounding box height as
-        (max_y - min_y),
-
-        thus we have either 0 or small positive
-
-
-    hmm. (baseline_offset, baseline_shift) somehow determine where to anchor the resulting
-    image. in above definition, they are an offset from top-left corner of the bitmap to the
-    pen origin for the first glyph. For best results, final bitmap blit to the interface element
-    should be done so that this point is on the line baseline (on y axis) and
-
-
-        beware of baseline_shift. usually font's descender is an adequate
-        approximation of that,     isn't really interesting since
-        origin_y is defined in font face.
-
-    basically, this code can not guarantee that the rendered string will fit into any preset height.
-    it can either clip or emit taller bitmaps.
-
-    item->shape.origin_(xy)
-    */
 
     int32_t origin_x, origin_y, w, h;  /* in fp26.6 */
 
@@ -815,17 +757,9 @@ static void shape_string(zhban_internal_t *z, shape_t *item) {
     /* adjust glyph origins - effectively move (0,0) around so that all pixels fit into the bitmap */
     adjust_glyph_origin(item, origin_x, origin_y);
 
-    /* convert to pixels */
-//    define FP266FLOOR(x) ( ((x) > 0) ? ((x)>>6)  : ( ((x) & 0x3f) ? (((x)>>6) - 1) : ((x)>>6) ) )
-//    define FP266CEIL(x) ( ((x) > 0 ? ((x) & 0x3f) ? (((x)>>6) + 1) : ((x)>>6)) : ((x)>>6) )
-
-//    item->shape.w = FP266CEIL(item->shape.w);
-//    item->shape.h = FP266CEIL(item->shape.h);
-
     log_trace(z, "26.6 w,h =  %d.%d, %d.%d origin = %d.%d, %d.%d",
                 w>>6, 100*abs(w&0x3f)/64, h>>6, 100*abs(h&0x3f)/64,
                 origin_x>>6, 100*abs(origin_x&0x3f)/64, origin_y>>6, 100*abs(origin_y&0x3f)/64);
-
 
     /* grid fit */
     item->shape.w = grid_fit_266(w);

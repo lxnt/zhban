@@ -159,6 +159,9 @@ ZHB_EXPORT void zhban_pp_color_vflip(zhban_bitmap_t *bitmap, zhban_shape_t *shap
 /* returns count of valid code points, and an upper bound at invalid codepoint count in an UTF-8 string */
 ZHB_EXPORT size_t zhban_8len(uint8_t *s, uint32_t *errors_ptr);
 
+/* finds next occurence of needle */
+ZHB_EXPORT uint16_t *zhban_utf16chr(uint16_t *hay, const uint16_t *haylimit, const uint16_t needle);
+
 /* converters below skip invalid code points. both return bytes written. buffer sizes in bytes */
 ZHB_EXPORT uint32_t zhban_8to16(uint8_t *src, uint32_t srcsize, uint16_t *dst, uint32_t dstsize);
 ZHB_EXPORT uint32_t zhban_16to8(uint16_t *src, uint32_t srcsize, uint8_t *dst, uint32_t dstsize);
