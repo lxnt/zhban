@@ -24,6 +24,10 @@ for each subpixel offset used per glyph - in exchange for text looking exactly a
 ``zhban_shape()`` accepts an UTF-16 encoded string, shapes it (determines which glyphs to place where), and returns ``zhban_shape_t``
 structure, defining string bounding box and origin offset.
 
+At this point a reference count is incremented for the shape structure, so that it, and any glyphs it consists of, are guaranteed to not be
+dropped from respective caches. Note that this means that glyph and shape cache size limits are soft - that is, they can be exceeded,
+if reference counts prevent dropping least recently used records.
+
 Origin offset determines where, relative to the  left bottom corner of the bounding box/bitmap, does the first glyph origin lies.
 
 Consider that no matter what line height you request, there almost always are individual glyphs that are either smaller or larger than that.
@@ -31,10 +35,6 @@ For example, the word 'can' will have minimal height when rendered, whereas the 
 height due to 'l' and 'y' glyphs. The only thing in common between these two strings is the baseline - imaginary line, to which all glyphs
 are somehow attached. Origin offset is the offset to start of this baseline from the lower-left corner of the bitmap, thus allowing to align
 all the bitmaps.
-
-At this point a reference count is incremented for the shape structure, so that it, and any glyphs it consists of, are guaranteed to not be
-dropped from respective caches. Note that this means that glyph and shape cache size limits are soft - that is, they can be exceeded,
-if reference counts prevent dropping least recently used records.
 
 After shaping is done you end up with multiple boxes, each representing a word or a string. At this point, text layout, line splitting, etc
 can be done.
