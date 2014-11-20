@@ -66,71 +66,109 @@ extern_C_curly_opens
     one repeatedly calling zhban_size(), doing layout, then somehow passing
     resulting string and final rectangle to the other, which repeatedly calls zhban_render().
 
+    zhban_t data members are strictly read-only.
+
     Caches and all FreeType data is kept in two sets, each used only by one of the functions.
 */
 
-typedef struct _zhban zhban_t;
+typedef struct _zhban {
+    /* font facts */
+    uint32_t em_width;
+    uint32_t space_advance;
+    uint32_t line_step;
 
-typedef struct _zhban_rect {
-    uint32_t *data; // RG_16UI of (intensity, index_in_source_string), or NULL. w*h*4 bytes.
-    uint32_t *cluster_map; // w cluster indices for background. go from glyph origin to next glyph origin.
-    int32_t w, h;
-    int32_t origin_x, origin_y;
-} zhban_rect_t;
+    /* cache statistics */
+    uint32_t glyph_size, glyph_limit, glyph_gets, glyph_hits, glyph_evictions;
+    uint32_t glyph_rendered, glyph_spans_seen;
+    uint32_t shaper_size, shaper_limit, shaper_gets, shaper_hits, shaper_evictions;
+    uint32_t bitmap_size, bitmap_limit, bitmap_gets, bitmap_hits, bitmap_evictions;
+
+} zhban_t;
+
+typedef struct _zhban_shape {
+    int32_t w, h;               /* bounding box = bitmap size */
+    int32_t origin_x, origin_y; /* first glyph origin coords relative to bottom left corner. GL/FT2 coordinate system */
+} zhban_shape_t;
+
+typedef struct _zhban_bitmap {
+    uint32_t *data;             /* RG_16UI of (intensity, index_in_source_string), or NULL. w*h*4 bytes. */
+    uint32_t data_size;         /* size of the above buffer in bytes */
+    uint32_t *cluster_map;      /* a row of cluster indices for background. go from glyph origin to next glyph origin. */
+    uint32_t cluster_map_size;  /* size of the above buffer in bytes */
+} zhban_bitmap_t;
 
 #define ZHLOG_TRACE 5
 #define ZHLOG_INFO  4
 #define ZHOGL_WARN  3
 #define ZHLOG_ERROR 2
-#define ZHOGL_FATAL 1
+#define ZHLOG_FATAL 1
+
 typedef void (*logsink_t)(const int level, const char *fmt, va_list ap);
 
 /* prepare to use a font face that FreeType2 can handle.
     data, size - buffer with the font data (must not be freed or modified before drop() call)
     pixheight - desired line interval in pixels
-    tabstep - tabs skip to next multiple of this in pixels. value <= 0 uses emwidth of the font.
-    sizerlimit, renderlimit - cache limits in bytes, excluding uthash overhead.
+    tabstep - tabs skip to next multiple of this in pixels. value <= 0 uses multiples of emwidth of the font.
+    subpixel_positioning - potentially better-looking results at the expense of glyph cache size (if nonzero)
+    sizerlimit, renderlimit - cache limits in bytes, excluding out-of-structure uthash overhead.
     verbose - primitive log toggle. spams stdout when nonzero.
 */
 ZHB_EXPORT zhban_t *zhban_open(const void *data, const uint32_t size,
-                                            int pixheight, int tabstep,
-                                            uint32_t sizerlimit, uint32_t renderlimit,
+                                            uint32_t pixheight,
+                                            uint32_t subpixel_positioning,
+                                            uint32_t glyphlimit, uint32_t sizerlimit, uint32_t renderlimit,
                                             int llevel, logsink_t lsink);
 ZHB_EXPORT void zhban_drop(zhban_t *);
 
 /* returns expected size of bitmap for the string in rv. data pointer is NULL.
    params:
     in
-        face - which face to size for
+        zhban - which zhban to size for
         string - UCS-2 string buffer
         strsize - string buffer size in bytes
-    out
-        rv - rect w/o render
-    return value - nonzero on error
+
+    return value - zhban_shape_t* or NULL on error
 */
-ZHB_EXPORT int zhban_size(zhban_t *zhban, const uint16_t *string, const uint32_t strsize,
-                                                                            zhban_rect_t *rv);
+ZHB_EXPORT zhban_shape_t *zhban_shape(zhban_t *zhban, const uint16_t *string, const uint32_t strsize);
+
+/* releases shape structure when it is not further expected to be used in a call to zhban_render() */
+ZHB_EXPORT void zhban_release_shape(zhban_t *zhban, zhban_shape_t *shape);
 
 /* returns cached bitmap of the string in rv, read-only, subsequent calls invalidate data pointer.
    params:
     in
-        face - which face to shape and render with
-        string - UCS-2 string buffer
-        strsize - string buffer size in bytes
-        w - renderer string width in pixels, previously returned by zhban_size() for this zhban
-            and string
-        rv - result of previous sizing. rv->data is irrelevant, rv->{w,h,bs,bo} must be valid.
-    out
-        rv - rendered bitmap in rv->data.
-            rendered bitmap is GL_RG16UI format, R component is intensity, G component is index of
-            UCS-2 codepoint in the string that caused the pixel to be rendered.
-            Value is 0 for zero intensity pixels.
-            Extra row (h -th) contains cluster(codepoint) index map
+        zhban - which zhban to shape and render with
+        shape - shaping results from previous call to zhban_shape()
 
-    return value: nonzero on error.
+    return value: zhban_bitmap_t or NULL on error.
 */
-ZHB_EXPORT int zhban_render(zhban_t *zhban, const uint16_t *string, const uint32_t strsize,
-                                                                            zhban_rect_t *rv);
+ZHB_EXPORT zhban_bitmap_t *zhban_render(zhban_t *zhban, zhban_shape_t *shape);
+
+/* postprocessing callback to mutilate the bitmap/cluster_map data just before it is returned. */
+typedef void (*zhban_postproc_t)(zhban_bitmap_t *b, zhban_shape_t *s, void *ptr);
+
+/* calls the supplied callback to post-process the bitmap. */
+ZHB_EXPORT zhban_bitmap_t *zhban_render_pp(zhban_t *zhban, zhban_shape_t *shape, zhban_postproc_t pproc, void *ptr);
+
+/* postprocessing convertor RG16UI->RGBA8UI, single color. ptr shall point to the desired color (RGBx), uint32_t */
+ZHB_EXPORT void zhban_pp_color(zhban_bitmap_t *bitmap, zhban_shape_t *shape, void *ptr);
+
+/* same as above, but also vertiflips - helper for use in SDL and the like */
+ZHB_EXPORT void zhban_pp_color_vflip(zhban_bitmap_t *bitmap, zhban_shape_t *shape, void *ptr);
+
+/* returns count of valid code points, and an upper bound at invalid codepoint count in an UTF-8 string */
+ZHB_EXPORT size_t zhban_8len(uint8_t *s, uint32_t *errors_ptr);
+
+/* converters below skip invalid code points. both return bytes written. buffer sizes in bytes */
+ZHB_EXPORT uint32_t zhban_8to16(uint8_t *src, uint32_t srcsize, uint16_t *dst, uint32_t dstsize);
+ZHB_EXPORT uint32_t zhban_16to8(uint16_t *src, uint32_t srcsize, uint8_t *dst, uint32_t dstsize);
+
+/* what is this shite */
+ZHB_EXPORT uint32_t zhban_wordcount(uint16_t *src, uint32_t srcsize);
+
+/* attempt at text reflow */
+ZHB_EXPORT uint32_t zhban_flow_text(zhban_t *zhban, uint16_t *text, uint32_t textsize,
+        uint32_t width, uint32_t height, uint32_t linestep, zhban_bitmap_t **results, uint32_t *bitmap_count);
 
 #if defined(__cplusplus)
 #define extern_C_curly_closes }

@@ -22,8 +22,7 @@ if (ARCH64)
     endif()
 endif()
 
-# mingw32 hack for the zlib
-#include_directories("${CMAKE_INSTALL_PREFIX}/include")
+option(BUILD_STATIC "Build libzhban_s.a" OFF)
 
 include(FindPkgConfig)
 pkg_check_modules(PKG_FT2 REQUIRED freetype2)
@@ -34,12 +33,18 @@ pkg_check_modules(PKG_HBZ REQUIRED harfbuzz)
 link_directories(${PKG_HBZ_LIBRARY_DIRS})
 include_directories( ${PKG_HBZ_INCLUDE_DIRS} )
 
-#add_library(hbfstatic STATIC zhban.c)
-#install(TARGETS hbfstatic ARCHIVE DESTINATION lib)
+if (BUILD_STATIC)
+    add_library(zhban_s STATIC zhban.c utf.c logging.c)
+    install(TARGETS zhban_s ARCHIVE DESTINATION lib)
+endif()
 
-add_library(zhban SHARED zhban.c)
+add_library(zhban SHARED zhban.c utf.c logging.c)
 target_link_libraries(zhban ${PKG_HBZ_LIBRARIES} ${PKG_FT2_LIBRARIES})
 install(TARGETS zhban LIBRARY DESTINATION lib)
+
+add_executable(zhbantest test.c)
+target_link_libraries(zhbantest zhban)
+install(TARGETS zhbantest RUNTIME DESTINATION bin/)
 
 install(FILES zhban.h DESTINATION include)
 install(FILES zhban.py DESTINATION lib/python3.2/site-packages)

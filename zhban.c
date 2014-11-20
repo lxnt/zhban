@@ -1,4 +1,4 @@
-/*  Copyright (c) 2012-2012 Alexander Sabourenkov (screwdriver@lxnt.info)
+/*  Copyright (c) 2012-2014 Alexander Sabourenkov (screwdriver@lxnt.info)
 
     This software is provided 'as-is', without any express or implied
     warranty. In no event will the authors be held liable for any
@@ -22,8 +22,10 @@
 
 #include <stdio.h>
 #include <stdarg.h>
+#include <stddef.h>
 
 #include "zhban.h"
+#include "zhban-internal.h"
 
 #include <uthash.h>
 #include <utlist.h>
@@ -36,95 +38,50 @@
 #include <hb.h>
 #include <hb-ft.h>
 
-const char *llname[] = { "null", "fatal", "error", "warn ", "info ", "trace" };
-static void printfsink(const int level, const char *fmt, va_list ap) {
-    fprintf(stderr, "[%s] ", llname[level < 0 ? 0 : (level > 5 ? 5: level)]);
-    vfprintf(stderr, fmt, ap);
-    fputc('\n', stderr);
-}
 
-static void logrintf(int msg_level, int cur_level, logsink_t log_sink, const char *fmt, ...) {
-    if (msg_level <= cur_level) {
-        va_list ap;
-        va_start(ap, fmt);
-        log_sink(msg_level, fmt, ap);
-        va_end(ap);
-    }
-}
+//{ context
 
-#define log_trace(obj, fmt, args...) do { logrintf(ZHLOG_TRACE, (obj)->log_level, (obj)->log_sink, "%s(): " fmt, __func__, ## args); } while(0)
-#define log_info(obj, fmt, args...)  do { logrintf(ZHLOG_INFO,  (obj)->log_level, (obj)->log_sink, "%s(): " fmt, __func__, ## args); } while(0)
-#define log_warn(obj, fmt, args...)  do { logrintf(ZHLOG_WARN,  (obj)->log_level, (obj)->log_sink, "%s(): " fmt, __func__, ## args); } while(0)
-#define log_error(obj, fmt, args...) do { logrintf(ZHLOG_ERROR, (obj)->log_level, (obj)->log_sink, "%s(): " fmt, __func__, ## args); } while(0)
-#define log_fatal(obj, fmt, args...) do { logrintf(ZHLOG_FATAL, (obj)->log_level, (obj)->log_sink, "%s(): " fmt, __func__, ## args); } while(0)
+typedef struct _shape shape_t;
+typedef struct _bitmap bitmap_t;
+typedef struct _glyph glyph_t;
 
-typedef struct _spanner_baton {
-    uint32_t *origin; // set to the glyph's origin. pixels are RG_16UI, so 32-bit. coords are GL/FT, not window (Y is up).
-    uint32_t *first_pixel, *last_pixel; // bounds check
-    uint16_t attribute; // per-glyph attribute (provoking character index ?)
-    int32_t width; // width is in pixels.
+static void drop_shape_cache(shape_t **);
+static void drop_bitmap_cache(bitmap_t **);
+static void drop_glyph_cache(glyph_t **);
+static void spanner(int px_y, int count, const FT_Span* spans, void *user);
 
-    int min_span_x;
-    int max_span_x;
-    int min_y;
-    int max_y;
-    int fail;
-    int log_level;
+typedef struct _zhban_internal {
+    zhban_t outer;
+
+    int32_t log_level;
     logsink_t log_sink;
-} spanner_baton_t;
 
-static void spanner(int y, int count, const FT_Span* spans, void *user) {
-    spanner_baton_t *baton = (spanner_baton_t *) user;
+    uint32_t pixheight;
+    uint32_t subpixel_positioning;  /* cache translated glyphs */
 
-    if (y < baton->min_y)
-        baton->min_y = y;
-    if (y > baton->max_y)
-        baton->max_y = y;
+    FT_Library ft_lib;
+    FT_Face ft_face;
+    FT_Error ft_err;
+    FT_Raster_Params ftr_params;
 
-    uint32_t *scanline;
-    for (int i = 0; i < count; i++) {
-        if (spans[i].x + spans[i].len > baton->max_span_x)
-            baton->max_span_x = spans[i].x + spans[i].len;
+    hb_font_t *hb_font;
+    hb_buffer_t *hb_buffer;
 
-        if (spans[i].x < baton->min_span_x)
-            baton->min_span_x = spans[i].x;
+    /* shaped strings cache */
+    shape_t *shaper_cache;
+    shape_t *shaper_history;
 
-        if (baton->origin != NULL) {
-            /* rendering */
-            scanline = baton->origin + y * baton->width;
-            if (scanline >= baton->first_pixel) {
-                uint32_t *start = scanline + spans[i].x;
-                uint16_t coverage = (spans[i].coverage<<8) | spans[i].coverage; // bit-replicate ala png
-                uint16_t attribute = baton->attribute;
+    /* glyphs cache */
+    glyph_t *glyph_cache;
+    glyph_t *glyph_history;
 
-                if (start + spans[i].len < baton->last_pixel) {
-                    for (int x = 0; x < spans[i].len; x++) {
-                        // achtung: endianness, RMW
-                        uint32_t t = *start & 0x0000FFFFU;
-                        t |= (attribute << 16) | coverage;
-                        *start++ = t;
-                    }
-                } else {
-                    log_error(baton, "  error: span overflow");
-                    log_info(baton, "  span %d origin %p width %d (0x%x) scanline %p fp %p lp %p", i,
-                                        baton->origin, baton->width, baton->width/4,
-                                        scanline, baton->first_pixel, baton->last_pixel);
-                    log_info(baton, "  span %d x=%d-%d y=%d start+len > last_pixel (%p + %d > %p).", i,
-                                                        spans[i].x, spans[i].x + spans[i].len, y,
-                                                           start, spans[i].len, baton->last_pixel);
-                    baton->fail = 1;
-                }
-            } else {
-                log_error(baton, "  error: scanline underflow");
-                log_info(baton, "  span %d origin %p width %d (0x%x) scanline %p fp %p lp %p", i,
-                        baton->origin, baton->width, baton->width/4, scanline, baton->first_pixel, baton->last_pixel);
-                log_info(baton, "  span %d x=%d-%d y=%d scanline < first_pixel.", i,
-                        spans[i].x, spans[i].x + spans[i].len, y);
-                baton->fail = 1;
-            }
-        }
-    }
-}
+    /* below - used in render thread */
+
+    /* bitmap cache */
+    bitmap_t *bitmap_cache;
+    bitmap_t *bitmap_history;
+
+} zhban_internal_t;
 
 static int force_ucs2_charmap(FT_Face ftf) {
     for(int i = 0; i < ftf->num_charmaps; i++)
@@ -136,91 +93,39 @@ static int force_ucs2_charmap(FT_Face ftf) {
     return -1;
 }
 
-typedef struct _zhban_item {
-    uint16_t *key; /* ucs-2 string*/
-    uint32_t key_size; /* strsize */
-    uint32_t key_allocd; /* might be > strsize if reused */
-
-    zhban_rect_t texrect;
-    uint32_t data_allocd; /* might be > w*h*4 if reused */
-
-    UT_hash_handle hh;
-    struct _zhban_item *prev;
-    struct _zhban_item *next;
-} zhban_item_t;
-
-struct _half_zhban {
-    int32_t log_level;
-    logsink_t log_sink;
-
-    int pixheight;
-    int baseline_y; // well. let baseline be descent pixels above the bitmap bottom.
-
-    FT_Library ft_lib;
-    FT_Face ft_face;
-    FT_Error ft_err;
-
-    hb_font_t *hb_font;
-    hb_buffer_t *hb_buffer;
-
-    zhban_item_t *cache;
-    zhban_item_t *history;
-
-    uint32_t cache_size;
-    uint32_t cache_limit;
-    
-    int32_t tab_step;
-};
-
-struct _zhban {
-    struct _half_zhban sizer;
-    struct _half_zhban render;
-};
-
-static int open_half_zhban(struct _half_zhban *half, const void *data, const uint32_t datalen,
-                                        const uint32_t tab_step, int32_t loglevel, logsink_t logsink) {
-    if ((half->ft_err = FT_Init_FreeType(&half->ft_lib)))
-        return 1;
-
-    if ((half->ft_err = FT_New_Memory_Face(half->ft_lib, data, datalen, 0, &half->ft_face)))
-        return 1;
-
-    if ((half->ft_err = force_ucs2_charmap(half->ft_face)))
-        return half->ft_err;
-
-    half->hb_font = hb_ft_font_create(half->ft_face, NULL);
-    half->hb_buffer = hb_buffer_create();
-    half->tab_step = tab_step;
-    half->log_level = loglevel;
-    half->log_sink = logsink;
-    return 0;
-}
-
-static void drop_half_zhban(struct _half_zhban *half) {
-    if (half->hb_buffer)
-        hb_buffer_destroy(half->hb_buffer);
-    if (half->hb_font)
-        hb_font_destroy(half->hb_font);
-    if (half->ft_face)
-        FT_Done_Face(half->ft_face);
-    if (half->ft_lib)
-        FT_Done_FreeType(half->ft_lib);
-}
-
-
-zhban_t *zhban_open(const void *data, const uint32_t datalen, int pixheight, int tab_step,
-                                        uint32_t sizerlimit, uint32_t renderlimit,
+zhban_t *zhban_open(const void *data, const uint32_t datalen, uint32_t pixheight,
+                                        uint32_t subpx,
+                                        uint32_t glyphlimit, uint32_t shaperlimit, uint32_t renderlimit,
                                         int32_t loglevel, logsink_t logsink) {
-    zhban_t *rv = malloc(sizeof(zhban_t));
-    if (!rv)
-        return rv;
 
-    memset(rv, 0, sizeof(zhban_t));
-    rv->sizer.cache_limit = sizerlimit;
-    rv->render.cache_limit = renderlimit;
-    if (   open_half_zhban(&rv->sizer, data, datalen, tab_step, loglevel, logsink ? logsink : printfsink)
-        || open_half_zhban(&rv->render, data, datalen, tab_step, loglevel, logsink ? logsink : printfsink))
+    zhban_internal_t *rv = malloc(sizeof(zhban_internal_t));
+    if (!rv)
+        return NULL;
+
+    memset(rv, 0, sizeof(zhban_internal_t));
+    rv->outer.glyph_limit = glyphlimit;
+    rv->outer.shaper_limit = shaperlimit;
+    rv->outer.bitmap_limit = renderlimit;
+
+    rv->log_level = loglevel;
+    rv->log_sink  = logsink ? logsink : printfsink;
+
+    if ((rv->ft_err = FT_Init_FreeType(&rv->ft_lib)))
         goto error;
+
+    if ((rv->ft_err = FT_New_Memory_Face(rv->ft_lib, data, datalen, 0, &rv->ft_face)))
+        goto error;
+
+    if ((rv->ft_err = force_ucs2_charmap(rv->ft_face)))
+        goto error;
+
+    rv->ftr_params.target = 0;
+    rv->ftr_params.flags = FT_RASTER_FLAG_DIRECT | FT_RASTER_FLAG_AA;
+    rv->ftr_params.user = NULL;
+    rv->ftr_params.black_spans = 0;
+    rv->ftr_params.bit_set = 0;
+    rv->ftr_params.bit_test = 0;
+    rv->ftr_params.gray_spans = spanner;
 
     FT_Size_RequestRec szreq;
     szreq.type = FT_SIZE_REQUEST_TYPE_SCALES; /* width and height are 16.16 scale values */
@@ -238,17 +143,24 @@ zhban_t *zhban_open(const void *data, const uint32_t datalen, int pixheight, int
         i. e. even if ascender-descender == height in font units,
         in pixels that may not hold true. */
 
-    log_trace(&rv->sizer, "Font units: asc %08x dsc %08x h %08x delta %08x",
-            rv->sizer.ft_face->ascender, - rv->sizer.ft_face->descender,
-            rv->sizer.ft_face->height,
-            rv->sizer.ft_face->ascender - rv->sizer.ft_face->descender);
+    log_trace(rv, "Font units: asc %08x dsc %08x h %08x delta %08x",
+            rv->ft_face->ascender, - rv->ft_face->descender,
+            rv->ft_face->height,
+            rv->ft_face->ascender - rv->ft_face->descender);
 
-    int req_size = pixheight, got_size, foo;;
+    uint32_t req_size = pixheight, got_size;
+    /* to rely on
+            rv->shaper.ft_face->height
+       or
+            (rv->shaper.ft_face->ascender - rv->shaper.ft_face->descender)
+       that is the question */
+#if 0
+    int foo;
     while(23) {
         szreq.width = ((req_size << 16) /
-            (rv->sizer.ft_face->ascender - rv->sizer.ft_face->descender)) << 6;
+            (rv->ft_face->ascender - rv->ft_face->descender + 1)) << 6;
         szreq.height = szreq.width;
-        if ((rv->sizer.ft_err = FT_Request_Size(rv->sizer.ft_face, &szreq))) {
+        if ((rv->ft_err = FT_Request_Size(rv->ft_face, &szreq))) {
             /* error? hmm. keep trying */
             if (req_size > pixheight/2) {
                 req_size -= 1;
@@ -256,52 +168,489 @@ zhban_t *zhban_open(const void *data, const uint32_t datalen, int pixheight, int
             }
             goto error;
         }
-        got_size = (rv->sizer.ft_face->size->metrics.ascender
-                        - rv->sizer.ft_face->size->metrics.descender) >> 6;
-        foo = (rv->sizer.ft_face->size->metrics.ascender >> 6);
-        foo -= (rv->sizer.ft_face->size->metrics.descender >> 6);
-        log_trace(&rv->sizer, "sizereq %d, %d vs %d; h %ld", req_size, got_size, foo,
-                                 rv->sizer.ft_face->size->metrics.height >> 6);
+        got_size = (rv->ft_face->size->metrics.ascender
+                        - rv->ft_face->size->metrics.descender + 1) >> 6;
+
+        /* foo is got_size calculated other way around to see any rounding errors */
+        foo = (rv->ft_face->size->metrics.ascender >> 6);
+        foo -= (rv->ft_face->size->metrics.descender >> 6);
+        foo += 1;
+
+        if (foo > got_size)
+            got_size = foo;
+
+        log_trace(rv, "req_size=%d, got_size=%d (%d); h=%ld", req_size, got_size, foo,
+                                 rv->ft_face->size->metrics.height >> 6);
         if (got_size <= pixheight)
             break;
         req_size -= 1;
     }
-    if ((rv->render.ft_err = FT_Request_Size(rv->render.ft_face, &szreq)))
+#else
+    while(42) {
+        szreq.width = szreq.height = ((req_size << 16) / (rv->ft_face->height)) << 6;
+        if ((rv->ft_err = FT_Request_Size(rv->ft_face, &szreq))) {
+            /* error? hmm. keep trying */
+            if (req_size > pixheight/2) {
+                req_size -= 1;
+                continue;
+            }
+            goto error;
+        }
+        got_size = rv->ft_face->size->metrics.height >> 6;
+        log_trace(rv, "req_size=%d, got_size=%d", req_size, got_size);
+        if (got_size <= pixheight)
+            break;
+        req_size -= 1;
+    }
+#endif
+
+    rv->pixheight = pixheight;
+    rv->subpixel_positioning = subpx;
+
+    rv->outer.em_width = rv->ft_face->size->metrics.x_ppem;
+    rv->outer.line_step = rv->ft_face->size->metrics.height >>6;
+
+   if ((rv->ft_err = FT_Load_Char(rv->ft_face, 0x0020u, 0))) {
+        log_error(rv, "FT_Load_Glyph(%08x): fterr=0x%02x", 0x0020u, rv->ft_err);
         goto error;
+    }
 
-    if (tab_step <= 0)
-        tab_step = rv->sizer.ft_face->size->metrics.x_ppem;
-    
-    rv->sizer.baseline_y = - (rv->sizer.ft_face->size->metrics.descender >> 6);
-    rv->render.baseline_y = rv->sizer.baseline_y;
-    rv->sizer.pixheight = pixheight;
-    rv->render.pixheight = pixheight;
-    rv->sizer.tab_step = tab_step;
-    rv->render.tab_step = tab_step;
+    rv->outer.space_advance = rv->ft_face->glyph->linearHoriAdvance>>16;
 
-    log_info(&rv->render, "render: asc %ld desc %ld height %ld x_ppem %d",
-            rv->render.ft_face->size->metrics.ascender >> 6,
-            rv->render.ft_face->size->metrics.descender >> 6,
-            rv->render.ft_face->size->metrics.height >> 6,
-            rv->render.ft_face->size->metrics.x_ppem);
+    log_info(rv, "accepted metrics: asc %d desc %d height %d em_width %d space_advance %d pixheight %d",
+            rv->ft_face->size->metrics.ascender >> 6,
+            rv->ft_face->size->metrics.descender >> 6,
+            rv->ft_face->size->metrics.height >> 6,
 
-    return rv;
+            rv->outer.em_width,
+            rv->outer.line_step,
+            rv->outer.space_advance,
+            pixheight);
+
+    /* initialize HB font here after font size is set (or ligatures go haywire) */
+    rv->hb_font = hb_ft_font_create(rv->ft_face, NULL);
+    rv->hb_buffer = hb_buffer_create();
+
+    return (zhban_t *)rv;
 
     error:
-    log_error(&rv->sizer, "zhban_open(): sizer FT_Err=0x%02X render FT_Err=0x%02X",
-                                                rv->sizer.ft_err, rv->render.ft_err);
-    drop_half_zhban(&rv->render);
-    drop_half_zhban(&rv->sizer);
+    log_error(rv, "zhban_open(): FT_Err=0x%02X ", rv->ft_err);
+    zhban_drop((zhban_t *)rv);
     free(rv);
     return NULL;
 }
 
-void zhban_drop(zhban_t *zh) {
-    drop_half_zhban(&zh->sizer);
-    drop_half_zhban(&zh->render);
-    free(zh);
+void zhban_drop(zhban_t *zhban) {
+    zhban_internal_t *z = (zhban_internal_t *) zhban;
+
+    if (z->hb_buffer)
+        hb_buffer_destroy(z->hb_buffer);
+    if (z->hb_font)
+        hb_font_destroy(z->hb_font);
+    if (z->ft_face)
+        FT_Done_Face(z->ft_face);
+    if (z->ft_lib)
+        FT_Done_FreeType(z->ft_lib);
+    drop_bitmap_cache(&z->bitmap_cache); /* bitmaps first, as they reference shapes */
+    drop_shape_cache(&z->shaper_cache);  /* then shapes, as they reference glyphs */
+    drop_glyph_cache(&z->glyph_cache);
+
+    free(z);
 }
 
+//}
+//{ glyph_t
+typedef struct _span {
+     int16_t x, y;       /* FT does multiple spans per y value, we don't */
+    uint16_t len;
+    uint16_t coverage;  /* bit-replicate expanded from uint8_t */
+} span_t;
+
+typedef struct _glyph {
+    /* key */
+    uint32_t  codepoint;
+    int32_t   frac_x; /* fractional part of translation */
+    int32_t   frac_y; /* applied when this glyph was rendered */
+
+    /* sizing section - in pixels. */
+    int32_t min_span_x;
+    int32_t max_span_x;
+    int32_t min_y;
+    int32_t max_y;
+
+    uint32_t  spans_used;   /* bytes */
+    uint32_t  spans_allocd; /* bytes */
+    span_t   *spans;
+
+    uint32_t  refcount;
+
+    UT_hash_handle hh;
+    struct _glyph *prev;
+    struct _glyph *next;
+} glyph_t;
+
+static void add_glyph_spans(glyph_t *dst, const int32_t y, const FT_Span *spans, const uint32_t count) {
+    const uint32_t required_bytes = count * sizeof(span_t);
+    if (dst->spans_allocd - dst->spans_used < required_bytes ) {
+        dst->spans_allocd += required_bytes;
+        dst->spans = realloc(dst->spans, dst->spans_allocd);
+    }
+    for (uint32_t i = 0; i < count ; i++) {
+        span_t *s = dst->spans + dst->spans_used/sizeof(span_t) + i;
+        s->len = spans[i].len;
+        s->x = spans[i].x;
+        s->y = y;
+        s->coverage = (spans[i].coverage << 8) | spans[i].coverage;
+    }
+    dst->spans_used += required_bytes;
+}
+
+static void drop_glyph(glyph_t *g) {
+    free(g->spans);
+    free(g);
+}
+
+static void drop_glyph_cache(glyph_t **head) {
+    glyph_t *elt, *tmp;
+    HASH_ITER(hh, *head, elt, tmp) {
+        HASH_DEL(*head, elt);
+        drop_glyph(elt);
+    }
+}
+
+static inline uint32_t glyph_sizeof(glyph_t *glyph) {
+    return sizeof(glyph_t) + glyph->spans_allocd;
+}
+
+static inline uint32_t glyph_expected_spans(zhban_internal_t *z) {
+    return (z->outer.glyph_spans_seen ? z->outer.glyph_spans_seen : 1) /
+           (z->outer.glyph_gets ? z->outer.glyph_gets : 1)  + 1;
+}
+static inline uint32_t glyph_expected_sizeof(zhban_internal_t *z) {
+    return sizeof(glyph_t) + sizeof(span_t) * glyph_expected_spans(z);
+}
+
+static glyph_t *reallocate_glyph(zhban_internal_t *z, glyph_t *glyph) {
+    if (!glyph) {
+        glyph = malloc(sizeof(glyph_t));
+        memset(glyph, 0, sizeof(glyph_t));
+    }
+    if (glyph->spans_allocd < sizeof(span_t) * glyph_expected_spans(z)) {
+        glyph->spans_allocd = sizeof(span_t) * glyph_expected_spans(z);
+        glyph->spans = malloc(glyph->spans_allocd);
+    }
+    return glyph;
+}
+
+static glyph_t *get_idle_glyph(zhban_internal_t *z) {
+    glyph_t *item, *evicted_item = NULL, *tmp;
+    uint32_t needed_space = glyph_expected_sizeof(z);
+    log_trace(z, "need %d have %d (%d - %d)", needed_space,
+            z->outer.glyph_limit - z->outer.glyph_size, z->outer.glyph_limit, z->outer.glyph_size);
+
+    /* if we are over the cache size limit, clean up some. */
+    DL_FOREACH_SAFE(z->glyph_history, item, tmp) {
+        /* ignore referenced ones */
+        if (item->refcount)
+            continue;
+
+        /* if we have enough space at last .. */
+        if (needed_space < (z->outer.glyph_limit - z->outer.glyph_size)) {
+            if (evicted_item)
+                /* got it by eviction, reuse item so as to not do free/alloc dance */
+                item = evicted_item;
+            else
+                /* just have free space here; reallocate_shape() will allocate new item */
+                item = NULL;
+            break;
+        }
+
+        /* drop evicted item if we need to evict more that one */
+        if (evicted_item)
+            drop_glyph(evicted_item);
+
+        HASH_DELETE(hh, z->glyph_cache, item);
+        DL_DELETE(z->glyph_history, item);
+        z->outer.glyph_size -= glyph_sizeof(item);
+        z->outer.glyph_evictions += 1;
+        evicted_item = item;
+    }
+
+    /* end up here with either an item to be reused (storage not touched),
+       or with item == NULL, in case either there's space in the cache to use,
+       or we failed to free up space in the cache (like, too much shapes with
+       refcount > 0), in which case we ignore the cache size limit. */
+
+    glyph_t *rv = reallocate_glyph(z, item);
+
+    /* grow cache to avoid thrashing (?) */
+    if (z->outer.glyph_limit < z->outer.glyph_size) {
+        log_trace(z, "grew glyph cache from %d to %d", z->outer.glyph_limit, z->outer.glyph_size);
+        z->outer.glyph_limit = z->outer.glyph_size;
+    }
+
+    return rv;
+}
+
+static void spanner(int y, int count, const FT_Span* spans, void *user) {
+    glyph_t *glyph = (glyph_t *) user;
+
+    if (y < glyph->min_y)
+        glyph->min_y = y;
+    if (y > glyph->max_y)
+        glyph->max_y = y;
+
+    for (int i = 0; i < count; i++) {
+        int32_t max_x = (spans[i].x + spans[i].len);
+        int32_t min_x = (spans[i].x);
+        if ( max_x > glyph->max_span_x)
+            glyph->max_span_x = max_x;
+        if (min_x < glyph->min_span_x)
+            glyph->min_span_x = min_x;
+    }
+    add_glyph_spans(glyph, y, spans, count);
+}
+/* returns nonzero on error */
+static int render_glyph(zhban_internal_t *z, glyph_t *glyph) {
+   if ((z->ft_err = FT_Load_Glyph(z->ft_face, glyph->codepoint, 0))) {
+        log_error(z, "FT_Load_Glyph(%08x): fterr=0x%02x", glyph->codepoint, z->ft_err);
+        return 1;
+    }
+    if (z->ft_face->glyph->format != FT_GLYPH_FORMAT_OUTLINE) {
+        log_error(z, "unexpected glyph->format = %4s", (char *)&z->ft_face->glyph->format);
+        return 1;
+    }
+    /* translate by the fractional part of the offset
+       not putting if (z->subpixel_positioning) here since FT_Outline_Translate()
+       is supposed to be cheap. */
+    FT_Outline_Translate(&z->ft_face->glyph->outline, glyph->frac_x, glyph->frac_y);
+
+    glyph->min_span_x = INT_MAX;
+    glyph->max_span_x = INT_MIN;
+    glyph->min_y = INT_MAX;
+    glyph->max_y = INT_MIN;
+    glyph->spans_used = 0;
+
+    z->ftr_params.user = glyph;
+
+    if ((z->ft_err = FT_Outline_Render(z->ft_lib, &z->ft_face->glyph->outline, &z->ftr_params))) {
+        log_error(z, "FT_Outline_Render() fterr=0x%02x", z->ft_err);
+        goto error;
+    }
+
+    z->outer.glyph_rendered += 1;
+    z->outer.glyph_spans_seen += glyph->spans_used/sizeof(span_t);
+
+    FT_Outline_Translate(&z->ft_face->glyph->outline, -glyph->frac_x, -glyph->frac_y);
+
+    log_trace(z, "cp %x %d spans frac_xy %d, %d, minmax_x %d, %d", glyph->codepoint,
+        glyph->spans_used/sizeof(span_t),
+        glyph->frac_x, glyph->frac_y, glyph->min_span_x, glyph->max_span_x);
+
+    return 0;
+error:
+    return 1;
+}
+
+static glyph_t *get_a_glyph(zhban_internal_t *z, uint32_t codepoint, int32_t frac_x, int32_t frac_y) {
+    glyph_t *item;
+    const int keylen = 3 * sizeof(int32_t);
+
+    if (z->subpixel_positioning) {
+        glyph_t key;
+        key.codepoint = codepoint;
+        key.frac_x = frac_x;
+        key.frac_y = frac_y;
+        HASH_FIND(hh, z->glyph_cache, &key, keylen, item);
+    } else {
+        HASH_FIND_INT(z->glyph_cache, &codepoint, item);
+    }
+
+    z->outer.glyph_gets += 1;
+    if (item) {
+        /* put the item at the head of history list*/
+        DL_DELETE(z->glyph_history, item);
+        DL_APPEND(z->glyph_history, item);
+        z->outer.glyph_hits += 1;
+        return item;
+    }
+
+    item = get_idle_glyph(z);
+    item->codepoint = codepoint;
+    item->frac_x = frac_x;
+    item->frac_y = frac_y;
+
+    /* suboptimally drop a glyph if rendering failed. */
+    /* it's that, or keep a list of them.. since it's very
+       rare to fail here, just drop it */
+    if (render_glyph(z, item)) {
+        drop_glyph(item);
+        return NULL;
+    }
+
+    if (z->subpixel_positioning) {
+        HASH_ADD_KEYPTR(hh, z->glyph_cache, item, keylen, item);
+    } else {
+        HASH_ADD_INT(z->glyph_cache, codepoint, item);
+    }
+    DL_APPEND(z->glyph_history, item);
+    z->outer.glyph_size += glyph_sizeof(item);
+
+    return item;
+}
+//}
+//{ shape_t
+/* glyph rendering sequence item. */
+typedef struct _glyph_info {
+    glyph_t  *glyph;        /* points into glyph cache */
+    int32_t   x_origin;     /* in 26.6 pixels */
+    int32_t   y_origin;     /* in 26.6 pixels */
+    uint32_t  cluster;
+}   glyph_info_t;
+
+typedef struct _shape {
+    zhban_shape_t shape;
+
+    uint32_t refcount;
+
+    /* USC-2 string, also hash key */
+    uint16_t *key;
+    uint32_t key_size;      /* size in bytes */
+    uint32_t key_allocd;    /* might be > size if reused */
+
+    /* shaper results */
+    glyph_info_t *glyphs;
+    uint32_t glyphs_allocd; /* in bytes. see add_glyph_info() */
+    uint32_t glyphs_used;   /* in bytes. */
+
+    UT_hash_handle hh;
+    struct _shape *prev;
+    struct _shape *next;
+} shape_t;
+
+static inline uint32_t expected_glyph_count(const uint32_t key_size) {
+    /* FIXME: ? */
+    return 3*key_size/4;
+}
+
+static uint32_t shape_sizeof(const shape_t *p) {
+    return sizeof(shape_t) + p->key_allocd + p->glyphs_allocd;
+}
+
+static uint32_t shape_expected_sizeof(const uint32_t key_size) {
+    return sizeof(shape_t) + key_size + sizeof(glyph_info_t) * expected_glyph_count(key_size);
+}
+
+static shape_t *reallocate_shape(shape_t *shape, const uint32_t key_size) {
+    if (!shape) {
+        shape = malloc(sizeof(shape_t));
+        memset(shape, 0, sizeof(shape_t));
+    }
+    if (shape->key_allocd < key_size) {
+        shape->key = realloc(shape->key, key_size);
+        shape->key_allocd = key_size;
+    }
+    if (shape->glyphs_used) {
+        for (uint32_t i=0; i < shape->glyphs_used/sizeof(glyph_info_t); i++)
+            shape->glyphs[i].glyph->refcount -= 1;
+        shape->glyphs_used = 0;
+    }
+    if (shape->glyphs_allocd < sizeof(glyph_info_t) * expected_glyph_count(key_size)) {
+        shape->glyphs_allocd = sizeof(glyph_info_t) * expected_glyph_count(key_size);
+        shape->glyphs = realloc(shape->glyphs, shape->glyphs_allocd);
+    }
+    return shape;
+}
+
+static void drop_shape(shape_t *s) {
+    for (uint32_t i=0; i < s->glyphs_used/sizeof(glyph_info_t); i++)
+        s->glyphs[i].glyph->refcount -= 1;
+    free(s->key);
+    free(s->glyphs);
+    free(s);
+}
+
+static void drop_shape_cache(shape_t **head) {
+    shape_t *elt, *tmp;
+    HASH_ITER(hh, *head, elt, tmp) {
+        HASH_DEL(*head, elt);
+        drop_shape(elt);
+    }
+}
+
+static shape_t *get_idle_shape(zhban_internal_t *z, const uint32_t key_size) {
+    shape_t *item, *evicted_item = NULL, *tmp;
+    uint32_t needed_space = shape_expected_sizeof(key_size);
+    log_trace(z, "need %d have %d (%d - %d)", needed_space,
+        z->outer.shaper_limit - z->outer.shaper_size, z->outer.shaper_limit, z->outer.shaper_size);
+
+    /* if we are over the cache size limit, clean up some. */
+    DL_FOREACH_SAFE(z->shaper_history, item, tmp) {
+        /* ignore referenced ones */
+        if (item->refcount)
+            continue;
+
+        /* if we have enough space at last .. */
+        if (needed_space < (z->outer.shaper_limit - z->outer.shaper_size)) {
+            if (evicted_item)
+                /* got it by eviction, reuse item so as to not do free/alloc dance */
+                item = evicted_item;
+            else
+                /* just have free space here; reallocate_shape() will allocate new item */
+                item = NULL;
+            break;
+        }
+
+        /* drop evicted item if we need to evict more that one */
+        if(evicted_item)
+            drop_shape(evicted_item);
+
+        HASH_DELETE(hh, z->shaper_cache, item);
+        DL_DELETE(z->shaper_history, item);
+        z->outer.shaper_size -= shape_sizeof(item);
+        z->outer.shaper_evictions += 1;
+        evicted_item = item;
+    }
+
+    /* end up here with either an item to be reused (storage not touched),
+       or with item == NULL, in case either there's space in the cache to use,
+       or we failed to free up space in the cache (like, too much shapes with
+       refcount > 0), in which case we ignore the cache size limit. */
+
+    shape_t *rv = reallocate_shape(item, key_size);
+
+    /* grow cache to avoid thrashing (?) */
+    if (z->outer.shaper_limit < z->outer.shaper_size) {
+        log_trace(z, "grew cache from %d to %d", z->outer.shaper_limit, z->outer.shaper_size);
+        z->outer.shaper_limit = z->outer.shaper_size;
+    }
+
+    return rv;
+}
+
+static void add_glyph_info(shape_t *dst, glyph_t *glyph, int32_t x_origin, int32_t y_origin, uint32_t cluster) {
+    if (dst->glyphs_used == dst->glyphs_allocd) {
+        /* reallocate with some space (25%+2 more glyphs) to spare */
+        dst->glyphs_allocd += dst->glyphs_allocd / 4 + sizeof(glyph_info_t) * 2;
+        dst->glyphs = realloc(dst->glyphs, dst->glyphs_allocd);
+    }
+    int i = dst->glyphs_used/sizeof(glyph_info_t);
+    dst->glyphs[i].glyph = glyph;
+    glyph->refcount += 1;
+    dst->glyphs[i].x_origin = x_origin;
+    dst->glyphs[i].y_origin = y_origin;
+    dst->glyphs[i].cluster  = cluster;
+    dst->glyphs_used += sizeof(glyph_info_t);
+}
+
+static void adjust_glyph_origin(shape_t *dst, hb_position_t delta_x, hb_position_t delta_y) {
+    for (uint32_t i = 0; i < dst->glyphs_used / sizeof(glyph_info_t); i++) {
+        dst->glyphs[i].x_origin += delta_x;
+        dst->glyphs[i].y_origin += delta_y;
+    }
+}
+//}
+//{ shaper
 static uint16_t *utf16chr( uint16_t *hay, const uint16_t *haylimit, const uint16_t needle) {
     uint16_t *ptr = hay;
     while(haylimit - ptr > 0)
@@ -311,27 +660,15 @@ static uint16_t *utf16chr( uint16_t *hay, const uint16_t *haylimit, const uint16
             ptr++;
     return ptr;
 }
+static inline int32_t grid_fit_266(int32_t value) {
+    return (value > 0) ?
+            ((value>>6) + (value & 0x3f ? 1 : 0)) :
+            ((value>>6) - (value & 0x3f ? 1 : 0)) ;
+}
 
-static void shape_stuff(struct _half_zhban *half, zhban_item_t *item) {
-    spanner_baton_t stuffbaton;
-
-    stuffbaton.log_level = half->log_level;
-    stuffbaton.log_sink = half->log_sink;
-
-    FT_Raster_Params ftr_params;
-    ftr_params.target = 0;
-    ftr_params.flags = FT_RASTER_FLAG_DIRECT | FT_RASTER_FLAG_AA;
-    ftr_params.user = &stuffbaton;
-    ftr_params.black_spans = 0;
-    ftr_params.bit_set = 0;
-    ftr_params.bit_test = 0;
-    ftr_params.gray_spans = spanner;
-
-    int x, y; // pen position.
-    //int horizontal = HB_DIRECTION_IS_HORIZONTAL(hb_buffer_get_direction(half->hb_buffer));
-    const int horizontal = 1;
-    uint32_t *origin = item->texrect.data;
-    int rendering = origin != NULL;
+static void shape_string(zhban_internal_t *z, shape_t *item) {
+    int x = 0, y = 0; // pen position, FT 26.6
+    //int horizontal = HB_DIRECTION_IS_HORIZONTAL(hb_buffer_get_direction(z->hb_buffer));
 
     int max_x = INT_MIN; // largest coordinate a pixel has been set at, or the pen was advanced to.
     int min_x = INT_MAX; // smallest coordinate a pixel has been set at, or the pen was advanced to.
@@ -342,285 +679,439 @@ static void shape_stuff(struct _half_zhban *half, zhban_item_t *item) {
         However, their differences still make up the bounding box for the string.
         Also note that all this is in FT coordinate system where y axis points upwards.
      */
-    
-    if (rendering) {
-        memset(origin, 0, (item->texrect.w)*(item->texrect.h+1)*4);
-        stuffbaton.width = item->texrect.w;
-        stuffbaton.first_pixel = origin;
-        stuffbaton.last_pixel = origin + item->texrect.w*item->texrect.h;
-        stuffbaton.attribute = 0;
-        /* origin of the first glyph - inital pen position, whatever. */
-        if (horizontal) {
-            //int offs = item->texrect.w * (item->texrect.h - item->texrect.baseline_offset - 1);
-            origin = stuffbaton.first_pixel;// + offs - item->texrect.baseline_shift;
-            item->texrect.cluster_map = item->texrect.data + item->texrect.w * item->texrect.h;
-        } else {
-            log_error(half, "error: non-horizontal scripts are not supported.");
-        }
-        /*  set initial pen position */
-        x = item->texrect.origin_x;
-        y = item->texrect.origin_y;
 
-        log_trace(half, "renderering into %dx%d %d,%d", item->texrect.w, item->texrect.h, x, y);
-    } else {
-        /* disable rendering */
-        stuffbaton.origin = NULL;
-        x = 0;
-        y = 0;
-    }
+    item->glyphs_used = 0; // reset glyph info/position storage
 
-    /* the idea is that the width of \t is (current_w extended to the next tabstop)-current_w 
-        where current_w is ...
-    
-        so we shape the next substring up until the next '\t', then add the '\t' width
-        to the current_x.
-    */
-    
     uint16_t *text = item->key;
     uint16_t *nextext = text;
     const uint16_t *textlimit = item->key + item->key_size/2;
     uint32_t textlen;
     int32_t cluster_offset; // number to add to glyph_info[j].cluster to arrive at correct value.
-    log_trace(half, "initial text %p textlimit %p", text, textlimit);
+    //log_trace(z, "initial text %p textlimit %p '%s'", text, textlimit, utf16to8(item->key, item->key_size));
     while (textlimit - nextext > 0) {
         nextext = utf16chr(text, textlimit, '\t');
         textlen = nextext - text;
         cluster_offset = text - item->key;
-        log_trace(half, "sub: text %p nextext %p textlen %d cluoffs %d", text, nextext, textlen, cluster_offset);
+        log_trace(z, "substring: text %p nextext %p textlen %d cluoffs %d", text, nextext, textlen, cluster_offset);
         /* shaping a substring: its pointer is in text, its length in textlen (characters) */
         if (textlen > 0) {
-            hb_buffer_clear_contents(half->hb_buffer);
-            hb_buffer_set_direction(half->hb_buffer, HB_DIRECTION_LTR);
-            hb_buffer_set_script(half->hb_buffer, HB_SCRIPT_LATIN);
-            //hb_buffer_set_language(half->hb_buffer, hb_language_from_string("en", 2));
-            hb_buffer_add_utf16(half->hb_buffer, text, textlen, 0, textlen);
+            hb_buffer_clear_contents(z->hb_buffer);
+            hb_buffer_set_direction(z->hb_buffer, HB_DIRECTION_LTR);
+            //hb_buffer_set_script(z->hb_buffer, HB_SCRIPT_LATIN);
+            //hb_buffer_set_language(z->hb_buffer, hb_language_from_string("en", 2));
+            hb_buffer_add_utf16(z->hb_buffer, text, textlen, 0, textlen);
 
-            hb_shape(half->hb_font, half->hb_buffer, NULL, 0);
+            hb_shape(z->hb_font, z->hb_buffer, NULL, 0);
 
             uint32_t glyph_count;
-            hb_glyph_info_t     *glyph_info = hb_buffer_get_glyph_infos(half->hb_buffer, &glyph_count);
-            hb_glyph_position_t *glyph_pos  = hb_buffer_get_glyph_positions(half->hb_buffer, &glyph_count);
-            FT_Error fterr;
+            hb_glyph_info_t     *glyph_info = hb_buffer_get_glyph_infos(z->hb_buffer, &glyph_count);
+            hb_glyph_position_t *glyph_pos  = hb_buffer_get_glyph_positions(z->hb_buffer, &glyph_count);
 
-            for (unsigned j = 0; j < glyph_count; ++j) {
-                if ((fterr = FT_Load_Glyph(half->ft_face, glyph_info[j].codepoint, 0))) {
-                    log_error(half, "FT_Load_Glyph(%08x): fterr=0x%02x",  glyph_info[j].codepoint, fterr);
-                } else {
-                    if (half->ft_face->glyph->format != FT_GLYPH_FORMAT_OUTLINE) {
-                        log_error(half, "unexpected glyph->format = %4s", (char *)&half->ft_face->glyph->format);
+            for (uint32_t j = 0; j < glyph_count; ++j) {
+                int32_t gx = x + glyph_pos[j].x_offset;
+                int32_t gy = y + glyph_pos[j].y_offset;
+                glyph_t *glyph = get_a_glyph(z, glyph_info[j].codepoint, gx & 0x3f, gy & 0x3f);
+                if (glyph) {
+                    if (glyph->min_span_x != INT_MAX) {
+                    /* Update values if the spanner was actually called. */
+                        if (min_x > (glyph->min_span_x<<6) + gx)
+                            min_x = (glyph->min_span_x<<6) + gx;
+
+                        if (max_x < (glyph->max_span_x<<6) + gx)
+                            max_x = (glyph->max_span_x<<6) + gx;
+
+                        if (min_y > (glyph->min_y<<6) + gy)
+                            min_y = (glyph->min_y<<6) + gy;
+
+                        if (max_y < (glyph->max_y<<6) + gy)
+                            max_y = (glyph->max_y<<6) + gy;
                     } else {
-                        int gx = x + (glyph_pos[j].x_offset/64);
-                        int gy = y + (glyph_pos[j].y_offset/64);
-
-                        stuffbaton.min_span_x = INT_MAX;
-                        stuffbaton.max_span_x = INT_MIN;
-                        stuffbaton.min_y = INT_MAX;
-                        stuffbaton.max_y = INT_MIN;
-                        stuffbaton.fail = 0;
-
-                        if (rendering) {
-                            /* origin of the glyph. */
-                            stuffbaton.origin = origin + stuffbaton.width * gy + gx;
-                            stuffbaton.attribute = glyph_info[j].cluster + cluster_offset;
-                        }
-
-                        if ((fterr = FT_Outline_Render(half->ft_lib, &half->ft_face->glyph->outline, &ftr_params)))
-                            log_error(half, "FT_Outline_Render() fterr=0x%02x", fterr);
-
-                        if (stuffbaton.min_span_x != INT_MAX) {
-                        /* Update values if the spanner was actually called. */
-                            if (min_x > stuffbaton.min_span_x + gx)
-                                min_x = stuffbaton.min_span_x + gx;
-
-                            if (max_x < stuffbaton.max_span_x + gx)
-                                max_x = stuffbaton.max_span_x + gx;
-
-                            if (min_y > stuffbaton.min_y + gy)
-                                min_y = stuffbaton.min_y + gy;
-
-                            if (max_y < stuffbaton.max_y + gy)
-                                max_y = stuffbaton.max_y + gy;
-                        } else {
-                        /* The spanner wasn't called at all - an empty glyph, like space. */
-                            if (min_x > gx) min_x = gx;
-                            if (max_x < gx) max_x = gx;
-                            if (min_y > gy) min_y = gy;
-                            if (max_y < gy) max_y = gy;
-                        }
-                        if (stuffbaton.fail) {
-                            log_error(half, "fail at glyph %d cluster %d xy %d,%d gxy %d,%d x in [%d,%d] y in [%d,%d]",
-                                    j, glyph_info[j].cluster, x, y, gx, gy,
-                                    stuffbaton.min_span_x + gx, stuffbaton.max_span_x + gx,
-                                    stuffbaton.min_y + gy, stuffbaton.max_y + gy
-                                );
-                        }
+                    /* The spanner wasn't called at all - an empty glyph, like space. */
+                        if (min_x > gx) min_x = gx;
+                        if (max_x < gx) max_x = gx;
+                        if (min_y > gy) min_y = gy;
+                        if (max_y < gy) max_y = gy;
+                        log_trace(z, "glyph %d: empty.", j); /* can't skip rendering it though? */
                     }
-                }
-
-                /* naive cluster map: just set from x+offset to x+offset+advance */
-                if (rendering) {
-                    int x_advance_px = glyph_pos[j].x_advance/64;
-                    log_trace(half, "glyph %d cluster 0x%08x x %d advance %d", j, glyph_info[j].cluster, x, x_advance_px);
-                    for (int cj = x; cj < x + x_advance_px; cj++)
-                        if (cj < item->texrect.w)
-                            item->texrect.cluster_map[cj] = glyph_info[j].cluster;
-                        else
-                            log_error(half, "cluster_map overflow by %d px", item->texrect.w - cj + 1);
-                }
-
-                x += glyph_pos[j].x_advance/64;
-                y += glyph_pos[j].y_advance/64;
+                    add_glyph_info(item, glyph, gx, gy, cluster_offset + glyph_info[j].cluster);
+                    log_trace(z, "glyph %d at %d.%d, %d.%d", j,
+                        gx>>6, 100*abs(gx&0x3f)/64, gy>>6, 100*abs(gy&0x3f)/64);
+                } /* else render_glyph() failed, skip it */
+                x += glyph_pos[j].x_advance;
+                y += glyph_pos[j].y_advance;
             }
-        }
-        /* eat any tabs */
-        while ((textlimit - nextext > 0) && (*nextext == '\t')) {
-            /* x+1 ensures  any '\t' exactly at a tab pos works. */
-            int next_tab_pos = (x+1) % half->tab_step ? (x+1)/half->tab_step + 1 : (x+1)/half->tab_step;
-            int tab_x_advance_px = next_tab_pos * half->tab_step - x;
-            log_trace(half, "ate tab at %p [%d]: %d px (x=%d ntp %d)", nextext, (int)(textlimit - nextext),
-                                                                    tab_x_advance_px, x, next_tab_pos);
-            if (rendering) {
-                int tab_character_index = nextext - item->key;
-                for (int cj = x; cj < x + tab_x_advance_px; cj++)
-                    if (cj < item->texrect.w)
-                        item->texrect.cluster_map[cj] = tab_character_index;
-                    else
-                        log_error(half, "cluster_map overflow by %d px", item->texrect.w - cj + 1);
-            }
-            x += tab_x_advance_px;
-            nextext += 1;
         }
         text = nextext;
     }
-    if (1 || !rendering) { /* don't overwrite texrect values if we're rendering. */
-        if (min_x > x) min_x = x;
-        if (max_x < x) max_x = x;
-        if (min_y > y) min_y = y;
-        if (max_y < y) max_y = y;
 
-        /* for horizontal :
-            int baseline_offset = horizontal ? max_y : min_x;
-            int baseline_shift = horizontal ? min_x : max_y;
+    if (min_x > x) min_x = x;
+    if (max_x < x) max_x = x;
+    if (min_y > y) min_y = y;
+    if (max_y < y) max_y = y;
 
-            if baseline_offset is negative, we set origin_x to
-                its negation to compensate at render
-                and expand the width accordingly.
-            if it is positive or zero, we set origin_x to zero.
+    log_trace(z, "extents: x [%d.%d, %d.%d] y [%d.%d, %d.%d]",
+            min_x>>6, 100*abs(min_x &0x3f)/64, max_x>>6, 100*abs(max_x &0x3f)/64,
+            min_y>>6, 100*abs(min_y & 0x3f)/64, max_y>>6, 100*abs(max_y & 0x3f)/64);
 
-            baseline_shift isn't really interesting since
-            origin_y is defined in font face.
-        */
+    /* for horizontal :
+        int baseline_offset = horizontal ? max_y : min_x;
+        int baseline_shift = horizontal ? min_x : max_y;
 
-        int tmp_w, ori_x;
-        if (min_x < 0) {
-            ori_x = -min_x;
-            tmp_w = max_x - min_x;
-        } else {
-            tmp_w = max_x;
-            ori_x = 0;
+        baseline_offset - offset of pen starting point on x axis for horizontal scripts.
+
+        if baseline_offset is negative, we set origin_x to
+            its negation to compensate at render
+            and expand the width accordingly.
+        if it is positive or zero, we set origin_x to zero.
+
+        baseline_shift - topmost pixel y coordinate. since we define bounding box height as
+        (max_y - min_y),
+
+        thus we have either 0 or small positive
+
+
+    hmm. (baseline_offset, baseline_shift) somehow determine where to anchor the resulting
+    image. in above definition, they are an offset from top-left corner of the bitmap to the
+    pen origin for the first glyph. For best results, final bitmap blit to the interface element
+    should be done so that this point is on the line baseline (on y axis) and
+
+
+        beware of baseline_shift. usually font's descender is an adequate
+        approximation of that,     isn't really interesting since
+        origin_y is defined in font face.
+
+    basically, this code can not guarantee that the rendered string will fit into any preset height.
+    it can either clip or emit taller bitmaps.
+
+    item->shape.origin_(xy)
+    */
+
+    int32_t origin_x, origin_y, w, h;  /* in fp26.6 */
+
+    if (min_x <= 0) {
+        /* means some pixels ended up with negative x coordinate. set up origin translation
+           so that they all end up with nonzero ones */
+        origin_x = -min_x;
+        w = max_x - min_x + 0x40;
+    } else {
+        /* all pixels to the right of origin. it happens in regular fonts. cut down the unused space.
+           so that spacing isn't broken */
+        origin_x = -min_x;
+        w = max_x - min_x;
+    }
+
+    if (min_y <= 0) {
+        /* means some pixels ended up with negative y coordinate. this is very common, origin
+           being at the baseline, thus descenders are always below.
+           set up origin translation so that all pixels end up with nonzero y-coord. */
+        origin_y = -min_y;
+        h = max_y - min_y + 0x40;
+    } else {
+        /* all pixels above the baseline. no idea why (all superscript?), but cut down the unused space.*/
+        origin_y = -min_y;
+        h = max_y - min_y;
+    }
+
+    /* adjust glyph origins - effectively move (0,0) around so that all pixels fit into the bitmap */
+    adjust_glyph_origin(item, origin_x, origin_y);
+
+    /* convert to pixels */
+//    define FP266FLOOR(x) ( ((x) > 0) ? ((x)>>6)  : ( ((x) & 0x3f) ? (((x)>>6) - 1) : ((x)>>6) ) )
+//    define FP266CEIL(x) ( ((x) > 0 ? ((x) & 0x3f) ? (((x)>>6) + 1) : ((x)>>6)) : ((x)>>6) )
+
+//    item->shape.w = FP266CEIL(item->shape.w);
+//    item->shape.h = FP266CEIL(item->shape.h);
+
+    log_trace(z, "26.6 w,h =  %d.%d, %d.%d origin = %d.%d, %d.%d",
+                w>>6, 100*abs(w&0x3f)/64, h>>6, 100*abs(h&0x3f)/64,
+                origin_x>>6, 100*abs(origin_x&0x3f)/64, origin_y>>6, 100*abs(origin_y&0x3f)/64);
+
+
+    /* grid fit */
+    item->shape.w = grid_fit_266(w);
+    item->shape.h = grid_fit_266(h);
+    item->shape.origin_x = grid_fit_266(origin_x);
+    item->shape.origin_y = grid_fit_266(origin_y);
+    log_trace(z, "FITD w,h =  %d,%d origin = %d,%d shape %p",
+        item->shape.w, item->shape.h, item->shape.origin_x, item->shape.origin_y, item);
+}
+
+zhban_shape_t *zhban_shape(zhban_t *zhban, const uint16_t *string, const uint32_t strsize) {
+    zhban_internal_t *z = (zhban_internal_t *)zhban;
+    shape_t *item;
+
+    z->outer.shaper_gets += 1;
+    HASH_FIND(hh, z->shaper_cache, string, strsize, item);
+    if (item) {
+        /* put the item at the head of history list*/
+        DL_DELETE(z->shaper_history, item);
+        DL_APPEND(z->shaper_history, item);
+        item->refcount += 1;
+        z->outer.shaper_hits += 1;
+        return (zhban_shape_t *)item;
+    }
+
+    item = get_idle_shape(z, strsize);
+    memcpy(item->key, string, strsize);
+    item->key_size = strsize;
+
+    shape_string(z, item);
+
+    HASH_ADD_KEYPTR(hh, z->shaper_cache, item->key, item->key_size, item);
+    DL_APPEND(z->shaper_history, item);
+    z->outer.shaper_size += shape_sizeof(item);
+
+    item->refcount += 1;
+
+    return (zhban_shape_t *)item;
+}
+
+void zhban_release_shape(zhban_t *zhban, zhban_shape_t *zs) {
+    shape_t *s = (shape_t *)zs;
+
+    if (s->refcount == 0)
+        log_fatal((zhban_internal_t *)zhban, "releasing already free shape");
+    s->refcount -= 1;
+}
+
+//}
+//{ bitmap_t
+typedef struct _bitmap {
+    zhban_bitmap_t bitmap;
+
+    shape_t *shape;       /* out there in the shaper. also - key. */
+
+    uint32_t data_allocd;
+
+    UT_hash_handle hh;
+    struct _bitmap *prev;
+    struct _bitmap *next;
+} bitmap_t;
+
+static uint32_t bitmap_sizeof(const bitmap_t *p) {
+    return sizeof(bitmap_t) + p->data_allocd;
+}
+
+static uint32_t bitmap_data_expected_size(const shape_t *zs) {
+    /* FIXME for vertical scripts - cluster map strip */
+    return (zs->shape.w + 0) * (zs->shape.h + 1) * 4;
+}
+
+static uint32_t bitmap_expected_sizeof(const shape_t *shape) {
+    return sizeof(bitmap_t) + bitmap_data_expected_size(shape);
+}
+
+static bitmap_t *reallocate_bitmap(const shape_t *shape, bitmap_t *bitmap) {
+    if (!bitmap) {
+        bitmap = malloc(sizeof(bitmap_t));
+        memset(bitmap, 0, sizeof(bitmap_t));
+    } else {
+        if (bitmap->shape) {
+            bitmap->shape->refcount --;
+            bitmap->shape = NULL;
         }
+    }
+    uint32_t data_size = bitmap_data_expected_size(shape);
+    if (bitmap->data_allocd < data_size) {
+        bitmap->data_allocd = data_size;
+        bitmap->bitmap.data = realloc(bitmap->bitmap.data, bitmap->data_allocd);
+    }
+    return bitmap;
+}
 
-        if (!rendering) {
-            item->texrect.w = tmp_w;
-            item->texrect.h = half->pixheight;
-            item->texrect.origin_x = ori_x;
-            item->texrect.origin_y = half->baseline_y;
-        }
+static void drop_bitmap(bitmap_t *z) {
+    if (z->shape)
+        z->shape->refcount -= 1;
+    free(z->bitmap.data);
+    free(z);
+}
 
-        log_trace(half, "[%c] x [%d,%d] y [%d,%d] tmp_w=%d ori_x=%d tr = %d,%d %d,%d",
-            rendering?'R':'S', min_x, max_x, min_y, max_y,
-            tmp_w, ori_x,
-            item->texrect.w, item->texrect.h,
-            item->texrect.origin_x, item->texrect.origin_y);
-
-        if (rendering && (tmp_w != item->texrect.w))
-            log_error(half, "error: resetting item->texrect.w %d -> %d", item->texrect.w, tmp_w);
+static void drop_bitmap_cache(bitmap_t **head) {
+    bitmap_t *elt, *tmp;
+    HASH_ITER(hh, *head, elt, tmp) {
+        HASH_DEL(*head, elt);
+        drop_bitmap(elt);
     }
 }
 
-static inline int item_sizeof(zhban_item_t *item) {
-    return item ? sizeof(zhban_item_t) + item->key_allocd + item->data_allocd : 0;
-}
-/* returns an unused item, not it the hash or history list, ready to accept key of key_size and data of datasize bytes */
-static zhban_item_t* get_usable_item(struct _half_zhban *hz, uint32_t key_size, uint32_t datasize) {
-    zhban_item_t *item, *prev_item = NULL;
+/* return a shape_t that can be (re)used for a given key_size minding cache size limit. */
+static bitmap_t *get_idle_bitmap(zhban_internal_t *z, const shape_t *shape) {
+    bitmap_t *item, *evicted_item = NULL, *tmp;
+    uint32_t needed_space = bitmap_expected_sizeof(shape);
 
-    while ((hz->cache_size > hz->cache_limit) && (hz->history != NULL)) {
-        item = hz->history;
-        HASH_DELETE(hh, hz->cache, item);
-        DL_DELETE(hz->history, item);
-        hz->cache_size -= item_sizeof(item);
-        if (prev_item) {
-            if (prev_item->key)
-                free(prev_item->key);
-            if (prev_item->texrect.data)
-                free(prev_item->texrect.data);
-            free(prev_item);
+    /* if we are over the cache size limit, clean up some. */
+    DL_FOREACH_SAFE(z->bitmap_history, item, tmp) {
+        /* if we have enough space at last .. */
+        if (needed_space < (z->outer.bitmap_limit - z->outer.bitmap_size)) {
+            if (evicted_item)
+                /* got it by eviction, reuse item so as to not do free/alloc dance */
+                item = evicted_item;
+            else
+                /* just have free space here; reallocate_shape() will allocate new item */
+                item = NULL;
+            break;
         }
-        prev_item = item;
-    }
-    item = prev_item;
-    if (!item) {
-        item = (zhban_item_t *)malloc(sizeof(zhban_item_t));
-        memset(item, 0, sizeof(zhban_item_t));
-    }
-    if (item->key_allocd < key_size) {
-        if (item->key)
-            item->key = realloc(item->key, key_size);
-        else
-            item->key = malloc(key_size);
-    }
-    if (item->data_allocd < datasize) {
-        if (item->texrect.data)
-            item->texrect.data = realloc(item->texrect.data, datasize);
-        else
-            item->texrect.data = malloc(datasize);
+
+        /* drop evicted item if we need to evict more that one */
+        if(evicted_item)
+            drop_bitmap(evicted_item);
+
+        HASH_DELETE(hh, z->bitmap_cache, item);
+        DL_DELETE(z->bitmap_history, item);
+        z->outer.bitmap_size -= bitmap_sizeof(item);
+        z->outer.bitmap_evictions += 1;
+        evicted_item = item;
     }
 
-    return item;
+    bitmap_t *rv = reallocate_bitmap(shape, item);
+
+    /* grow cache to avoid thrashing (?) */
+    if (z->outer.bitmap_limit < z->outer.bitmap_size) {
+        log_trace(z, "grew cache from %d to %d", z->outer.bitmap_limit, z->outer.bitmap_size);
+        z->outer.bitmap_limit = z->outer.bitmap_size;
+    }
+
+    return rv;
 }
 
-static int do_stuff(zhban_t *zhban, const uint16_t *string, const uint32_t strsize, int do_render, zhban_rect_t *rv) {
-    zhban_item_t *item;
-    struct _half_zhban *hz;
-    uint32_t datasize;
+//}
+//{ renderer
+static void render_shape(zhban_internal_t *z, bitmap_t *item) {
+    shape_t *sh = item->shape;
 
-    hz = do_render ? &zhban->render : &zhban->sizer;
-    datasize = do_render ? rv->w * (rv->h + 1) * 4 : 0;
+    memset(item->bitmap.data, 0, (sh->shape.w) * (sh->shape.h + 1) * 4);
 
-    HASH_FIND(hh, hz->cache, string, strsize, item);
-    if (!item) {
-        item = get_usable_item(hz, strsize, datasize);
-        if (do_render) {
-            /* copy geometry so we know where to render */
-            item->texrect.w = rv->w;
-            item->texrect.h = rv->h;
-            item->texrect.origin_x = rv->origin_x;
-            item->texrect.origin_y = rv->origin_y;
-        } else {
-            if (item->texrect.data != NULL) {
-                log_error(hz, "error: sizer cache contamination!");
+    const  int32_t  pitch = sh->shape.w;  /* must be signed, or hilarity ensues */
+    const uint32_t *first_pixel = item->bitmap.data;
+    const uint32_t *last_pixel = item->bitmap.data + sh->shape.w * sh->shape.h - 1;
+
+    item->bitmap.cluster_map = item->bitmap.data + sh->shape.w * sh->shape.h;
+    item->bitmap.data_size = sh->shape.w * sh->shape.h * 4;
+    item->bitmap.cluster_map_size = sh->shape.w * 4;
+
+    int x_cmlimit;
+    const uint32_t glyph_count =  sh->glyphs_used/sizeof(glyph_info_t);
+
+    log_trace(z, "renderering into %dx%d origin %d,%d shape %p",
+                sh->shape.w, sh->shape.h, sh->shape.origin_x, sh->shape.origin_y, sh);
+
+    for (uint32_t glyph_i = 0; glyph_i < glyph_count; glyph_i++) {
+        glyph_info_t *g_info = sh->glyphs + glyph_i;
+        glyph_t *glyph = g_info->glyph;
+
+        const uint32_t span_count = glyph->spans_used/sizeof(span_t);
+
+        /* FIXME: pixel format, endianness */
+        const uint32_t attribute_shifted = (g_info->cluster & 0xFFFFu)<<16;
+        const uint32_t attribute_mask = 0x0000FFFFU;
+
+        int32_t gx = g_info->x_origin >> 6; /* translate */
+        int32_t gy = g_info->y_origin >> 6; /* to pixels */
+        uint32_t *origin = item->bitmap.data + pitch * gy + gx;
+
+        log_trace(z, "rendering glyph %d at  %d,%d", glyph_i, gx, gy);
+
+        for (uint32_t span_i = 0; span_i < span_count; span_i++) {
+            span_t   *span = glyph->spans + span_i;
+            uint32_t *start = origin + span->y * pitch + span->x;
+
+            if (start >= first_pixel) {
+                if (start + span->len <= last_pixel) {
+                    for (int x = 0; x < span->len; x++) {
+                        /* FIXME: pixel format, endianness */
+                        uint32_t t = *start & attribute_mask;
+                        t |= attribute_shifted | span->coverage;
+                        *start++ = t;
+                    }
+                } else {
+                    log_error(z, "  error: overflow (origin=%p start=%p fp=%p lp=%p )", origin, start, first_pixel, last_pixel);
+                    log_info(z,  "  span %d x [%d,%d] y %d | abs [%d,%d] y %d", span_i, span->x, span->x + span->len, span->y,
+                            gx + span->x, gx + span->x + span->len, gy + span->y);
+                }
+            } else {
+                log_error(z, "  error: underflow (origin=%p start=%p fp=%p lp=%p )", origin, start, first_pixel, last_pixel);
+                log_info(z,  "  span %d x [%d,%d] y %d | abs [%d,%d] y %d", span_i, span->x, span->x + span->len, span->y,
+                        gx + span->x, gx + span->x + span->len, gy + span->y);
             }
         }
 
-        /* copy the key */
-        memcpy(item->key, string, strsize);
-        item->key_size = strsize;
+        /* naive cluster map: just set from x_origin to next_x_origin (disregards offsets, etc) */
+        /* FIXME: vertical scripts */ /* FIXME!! */ /* FIIIIXXXXXMMEEEE */
+        x_cmlimit = (glyph_i == sh->glyphs_used - 1) ? (sh->glyphs[glyph_i+1].x_origin)>>6 : sh->shape.w;
+        x_cmlimit = x_cmlimit > sh->shape.w ? sh->shape.w : x_cmlimit;
+        x_cmlimit = x_cmlimit < 0 ? 0 : x_cmlimit;
 
-        shape_stuff(hz, item);
-        HASH_ADD_KEYPTR(hh, hz->cache, item->key, item->key_size, item);
-    } else {
-        DL_DELETE(hz->history, item);
+        log_trace(z, "clustermapping glyph %d cluster %d x,y %d,%d x_cmlimit %d", glyph_i,
+                    g_info->cluster, g_info->x_origin>>6, g_info->y_origin>>6, x_cmlimit);
+        for (int32_t cj = g_info->x_origin>>6; cj < x_cmlimit; cj++)
+            item->bitmap.cluster_map[cj] = g_info->cluster;
     }
-    DL_APPEND(hz->history, item);
-    memcpy(rv, &item->texrect, sizeof(zhban_rect_t));
-    return 0;
 }
 
-int zhban_size(zhban_t *zhban, const uint16_t *string, const uint32_t strsize, zhban_rect_t *rv) {
-    return do_stuff(zhban, string, strsize, 0, rv);
+zhban_bitmap_t *zhban_render_pp(zhban_t *zhban, zhban_shape_t *zshape, zhban_postproc_t pp, void *u) {
+    zhban_internal_t *z = (zhban_internal_t *)zhban;
+    shape_t *shape = (shape_t *)zshape;
+    bitmap_t *item;
+    z->outer.bitmap_gets += 1;
+
+    HASH_FIND(hh, z->bitmap_cache, &shape, sizeof(zhban_t *), item);
+    if (item) {
+        /* put the item at the head of history list */
+        DL_DELETE(z->bitmap_history, item);
+        DL_APPEND(z->bitmap_history, item);
+        z->outer.bitmap_hits += 1;
+        return (zhban_bitmap_t *)item;
+    }
+
+    item = get_idle_bitmap(z, shape);
+    item->shape = shape;
+    item->shape->refcount += 1;
+
+    render_shape(z, item);
+
+    HASH_ADD_KEYPTR(hh, z->bitmap_cache, &(item->shape), sizeof(zhban_t *), item);
+    DL_APPEND(z->bitmap_history, item);
+    z->outer.bitmap_size += bitmap_sizeof(item);
+
+    if (pp)
+        pp((zhban_bitmap_t *)item, zshape, u);
+
+    return (zhban_bitmap_t *)item;
 }
 
-int zhban_render(zhban_t *zhban, const uint16_t *string, const uint32_t strsize, zhban_rect_t *rv) {
-    return do_stuff(zhban, string, strsize, 1, rv);
+zhban_bitmap_t *zhban_render(zhban_t *zhban, zhban_shape_t *zshape) {
+    return zhban_render_pp(zhban, zshape, NULL, NULL);
 }
+
+void zhban_pp_color(zhban_bitmap_t *b, zhban_shape_t *s ATTR_UNUSED, void *u) {
+    /* FIXME: endianness */
+    uint32_t color = (*(uint32_t *)u) & 0x00FFFFFFu;
+    for(uint32_t i = 0; i < b->data_size/4; i++) {
+        uint32_t alpha = (b->data[i] & 0xFFu) << 24;
+        if (alpha)
+            b->data[i] = color | alpha;
+        else
+            b->data[i] = 0;
+    }
+}
+
+void zhban_pp_color_vflip(zhban_bitmap_t *b, zhban_shape_t *s ATTR_UNUSED, void *u) {
+    /* FIXME: endianness */
+    uint32_t color = (*(uint32_t *)u) & 0x00FFFFFFu;
+    bitmap_t *bitmap = (bitmap_t *)b;
+    uint32_t *buf = malloc(bitmap->data_allocd);
+    for (int32_t y = 0; y < s->h ; y++) {
+        for (int32_t x = 0; x < s->w ; x++) {
+            uint32_t i =  x + s->w * y;
+            uint32_t j =  x + s->w * (s->h - y - 1);
+            uint32_t alpha = (b->data[i] & 0xFFu) << 24;
+            if (alpha)
+                buf[j] = color | alpha;
+            else
+                buf[j] = 0;
+        }
+    }
+    free(b->data);
+    b->data = buf;
+}
+//}

@@ -1,129 +1,169 @@
 #!/usr/bin/python3.2
 
-import os, sys, ctypes, time, struct
-import pygame2
+import os, sys, ctypes, time, struct, re
+import sdl2
+import sdl2.events
+import sdl2.video
+import sdl2.surface
+import sdl2.blendmode
+import sdl2.pixels
+import sdl2.render
 
-_pgld = os.environ.get('PGLIBDIR', False)
-if _pgld:
-    pygame2.set_dll_path(_pgld)
-    print("dll path set to " + _pgld)
-
-import pygame2.sdl as sdl
-import pygame2.sdl.events as sdlevents
-import pygame2.sdl.video as sdlvideo
-import pygame2.sdl.surface as sdlsurface
-import pygame2.sdl.pixels as sdlpixels
-import pygame2.sdl.hints as sdlhints
-import pygame2.sdl.render as sdlrender
-
-from pygame2.sdl.rect import SDL_Rect
-from pygame2.sdl.video import SDL_Surface
-from pygame2.sdl.keycode import *
+from sdl2.keycode import *
 
 from zhban import *
-
-colorset = (
-   (0xff, 0x00, 0x00),
-   (0x00, 0xff, 0x00),
-   (0x00, 0x00, 0xff),
-   (0x80, 0x00, 0x00),
-   (0x00, 0x80, 0x00),
-   (0x00, 0x00, 0x80),
-   (0x80, 0x80, 0x80),
-   (0xff, 0xff, 0x00),
-   (0x00, 0xff, 0xff),
-   (0xff, 0x00, 0xff),
-   (0xff, 0xff, 0x00),
-   (0x00, 0xff, 0xff),
-   (0xff, 0x00, 0xff),
-   (0xff, 0xff, 0xff),
-)
-
-def colorize(buf):
-    rv = bytearray(len(buf))
-    def iter_unpack(fmt, buf):
-        offs = 0
-        inc = struct.calcsize(fmt)
-        while offs < len(buf):
-            yv = struct.unpack_from(fmt, buf, offs)
-            offs += inc
-            yield yv
-    offs = 0
-    for alpha, cluster in iter_unpack("HH", buf):
-        color = colorset[cluster % len(colorset)]
-        if alpha > 0:
-            struct.pack_into("BBBB", rv, offs, color[0], color[1], color[2], alpha>>8)
-        else:
-            struct.pack_into("BBBB", rv, offs, 0, 0, 0, 0)
-        offs += 4
-    return bytes(rv)
+from divide import *
 
 def init(size=(480, 320), title='zhban test', icon=None):
-    #sdlhints.set_hint(SDL_HINT_RENDER_DRIVER, 'software')
-    sdlhints.set_hint(sdlhints.SDL_HINT_FRAMEBUFFER_ACCELERATION, '0') # do not need no window surface
-    sdl.init(sdl.SDL_INIT_VIDEO | sdl.SDL_INIT_NOPARACHUTE)
-    window = sdlvideo.create_window(title, sdlvideo.SDL_WINDOWPOS_UNDEFINED, sdlvideo.SDL_WINDOWPOS_UNDEFINED, 
-        size[0], size[1], sdlvideo.SDL_WINDOW_OPENGL | sdlvideo.SDL_WINDOW_RESIZABLE)
+    sdl2.SDL_Init(sdl2.SDL_INIT_VIDEO | sdl2.SDL_INIT_NOPARACHUTE)
+    window = sdl2.SDL_CreateWindow(title.encode('utf-8'), sdl2.video.SDL_WINDOWPOS_UNDEFINED, sdl2.video.SDL_WINDOWPOS_UNDEFINED,
+        size[0], size[1], sdl2.video.SDL_WINDOW_OPENGL | sdl2.video.SDL_WINDOW_RESIZABLE)
     if icon:
-        sdlvideo.set_window_icon(window, icon)
-    renderer = sdlrender.create_renderer(window, -1, sdlrender.SDL_RENDERER_ACCELERATED)
+        sdl2.video.SDL_SetWindowIcon(window, icon)
+    renderer = sdl2.render.SDL_CreateRenderer(window, -1, sdl2.render.SDL_RENDERER_ACCELERATED)
+    i = sdl2.render.SDL_RendererInfo()
+    sdl2.render.SDL_GetRendererInfo(renderer, ctypes.byref(i))
     return (window, renderer)
 
-def drawsurf(renderer, surf, b = False):
-    sdlrender.set_render_draw_color(renderer, 0, 0, 0, 255)
-    sdlrender.render_clear(renderer)
-    tex = sdlrender.create_texture_from_surface(renderer, surf)
-    sdlrender.set_texture_blend_mode(tex, sdlvideo.SDL_BLENDMODE_NONE)
-    vp = sdlrender.render_get_viewport(renderer)
-    x = (vp.w - surf._w)//2
-    y = (vp.h - surf._h)//2
-    if b:
-        border = SDL_Rect(x - 1, y - 1, surf._w + 2, surf._h + 2)
-        sdlrender.set_render_draw_color(renderer, 255, 0, 0, 255)
-        sdlrender.render_draw_rect(renderer, border)
-    dst = SDL_Rect(x, y, surf._w, surf._h)
-    sdlrender.render_copy_ex(renderer, tex, dstrect=dst, flip=sdlrender.SDL_FLIP_VERTICAL)
-    #sdlrender.render_copy(renderer, tex, None, None)
+def wraptext(zhban, text, w, h, fl_indent = 0, method = divide):
+    color = (0xB0, 0xB0, 0xB0)
+    bpp   = ctypes.c_int()
+    rmask = ctypes.c_uint()
+    gmask = ctypes.c_uint()
+    bmask = ctypes.c_uint()
+    amask = ctypes.c_uint()
+    sdl2.pixels.SDL_PixelFormatEnumToMasks(sdl2.pixels.SDL_PIXELFORMAT_ABGR8888,
+        ctypes.byref(bpp), ctypes.byref(rmask), ctypes.byref(gmask), ctypes.byref(bmask), ctypes.byref(amask))
+    surf = sdl2.surface.SDL_CreateRGBSurface(0, w, h, bpp, rmask, gmask, bmask, amask)
+    line_step = zhban.line_step
+    space_advance = zhban.space_advance
+
+    x = 0
+    y = line_step
+
+    class plead(object):
+        def __len__(self):
+            return fl_indent * zhban.em_width
+
+    for para in re.split(r"\n+", text):
+        if para:
+            swords = para.split()
+            words = [plead()]
+            for sword in swords:
+                words.append(zhban.shape(sword).contents)
+
+            def wlen(s):
+                return len(s) + space_advance
+
+            lines = divide(words, w, wlen)
+
+            for line in lines:
+                for shape in line:
+                    if type(shape) is plead:
+                        x += len(shape)
+                        continue
+                    bitmap = zhban.render_colored(shape, color, vflip = True)
+                    bsurf = sdl2.surface.SDL_CreateRGBSurfaceFrom(bitmap.contents.data, shape.w, shape.h,
+                                                                    bpp, shape.w*4, rmask, gmask, bmask, amask)
+                    sdl2.surface.SDL_SetSurfaceBlendMode(bsurf, sdl2.blendmode.SDL_BLENDMODE_NONE)
+                    srcrect = sdl2.rect.SDL_Rect(0, 0, shape.w, shape.h)
+
+                    dst_x = x - shape.origin_x
+                    dst_y = y - (shape.h - shape.origin_y)
+
+                    dstrect = sdl2.rect.SDL_Rect(dst_x, dst_y, shape.w, shape.h)
+                    sdl2.surface.SDL_BlitSurface(bsurf, srcrect, surf, dstrect)
+
+                    zhban.release_shape(shape)
+
+                    x += shape.w + space_advance
+
+                x = 0
+                y += line_step
+                if y > (h - line_step):
+                    break
+        y += line_step
+        if y > (h - line_step):
+            break
+    print('\n'.join(zhban.ppstats))
+    return surf
+
+def drawsurf(renderer, surf, border, blend):
+    sdl2.render.SDL_SetRenderDrawColor(renderer, 0, 0, 0, 255)
+    sdl2.render.SDL_RenderClear(renderer)
+
+    tex = sdl2.render.SDL_CreateTextureFromSurface(renderer, surf)
+    if blend:
+        sdl2.render.SDL_SetTextureBlendMode(tex, sdl2.blendmode.SDL_BLENDMODE_BLEND)
+    else:
+        sdl2.render.SDL_SetTextureBlendMode(tex, sdl2.blendmode.SDL_BLENDMODE_NONE)
+    vp = sdl2.rect.SDL_Rect()
+    sdl2.render.SDL_RenderGetViewport(renderer, ctypes.byref(vp))
+    x = (vp.w - surf.contents.w)//2
+    y = (vp.h - surf.contents.h)//2
+    if border:
+        border = sdl2.rect.SDL_Rect(x - 1, y - 1, surf.contents.w + 2, surf.contents.h + 2)
+        sdl2.render.SDL_SetRenderDrawColor(renderer, 255, 0, 0, 255)
+        sdl2.render.SDL_RenderDrawRect(renderer, border)
+    dst = sdl2.rect.SDL_Rect(x, y, surf.contents.w, surf.contents.h)
+    sdl2.render.SDL_RenderCopy(renderer, tex, None, ctypes.byref(dst))
 
 def main():
-    win, lose = init()
-    z = Zhban(open(sys.argv[1], "rb").read(), 64, loglevel=5)
-    text = '\t'.join(sys.argv[2:])
+    zhban = Zhban(open(sys.argv[1], "rb").read(), 18, loglevel=4)
     text = open(sys.argv[2], 'rb').read().decode('utf-8')
-    #print(text)
-    s = z.size(text)
-    print("sized rect {!r}".format(s))
-    r = z.render(text, s.copy())
-    print("rendered rect {!r}".format(r))
-    if True:
-        dump = open("dump", "wb")
-        dump.write(r.data)
-        dump.write(r.cluster_map)
-        print("dumped.")
 
-    data = colorize(r.data)
-    masks = list(sdlpixels.pixelformat_enum_to_masks(sdlpixels.SDL_PIXELFORMAT_ABGR8888))
-    #masks = list(sdlpixels.pixelformat_enum_to_masks(sdlpixels.SDL_PIXELFORMAT_RGBA8888))
-    bpp = masks.pop(0)
-    surf = sdlsurface.create_rgb_surface_from(data, r.w, r.h, bpp, r.w*4, *masks)
-    b = True
+    w = 480
+    h = 640
+    win, lose = init((w,h))
+
+    border = False
+    blend = True
+    fl_indent = 0
+    method = divide
+    reflow = False
+    surf = wraptext(zhban, text, w - 32, h - 32, fl_indent, method)
+    ev = sdl2.events.SDL_Event()
+    vp = sdl2.rect.SDL_Rect(0, 0, w, h)
+    sdl2.render.SDL_RenderSetViewport(lose, ctypes.byref(vp))
     while True:
-        while True:
-            ev = sdlevents.poll_event(True)
+        while sdl2.events.SDL_PollEvent(ctypes.byref(ev), 1):
+
             if ev is None:
                 break
-            elif ev.type == sdlevents.SDL_KEYDOWN:
+            elif ev.type == sdl2.events.SDL_KEYDOWN:
                 kcode = ev.key.keysym.sym
                 if kcode == SDLK_SPACE:
-                    b = not b
+                    border = not border
+                elif kcode == SDLK_b:
+                    blend = not blend
+                elif kcode == SDLK_l:
+                    fl_indent += 1
+                    if fl_indent > 3:
+                        fl_indent = 0
+                    reflow = True
+                elif kcode == SDLK_m:
+                    method = divide if method == linear else linear
+                    reflow = True
+                elif kcode == SDLK_q:
+                    return
                 elif kcode == SDLK_ESCAPE:
                     return
-            elif ev.type == sdlevents.SDL_QUIT:
+            elif ev.type == sdl2.events.SDL_QUIT:
                 return
+            elif ev.type == sdl2.events.SDL_WINDOWEVENT:
+                if ev.window.event == sdl2.video.SDL_WINDOWEVENT_RESIZED:
+                    w = ev.window.data1 if ev.window.data1 > 64 else 64
+                    h = ev.window.data2 if ev.window.data2 > 64 else 64
+                    vp = sdl2.rect.SDL_Rect(0, 0, w, h)
+                    sdl2.render.SDL_RenderSetViewport(lose, ctypes.byref(vp))
+                    reflow = True
 
-        drawsurf(lose, surf, b)
-        sdlrender.render_present(lose)
-        time.sleep(0.13)
+        if reflow:
+            surf = wraptext(zhban, text, w - 32, h - 32, fl_indent, method)
+            reflow = False
+        drawsurf(lose, surf, border, blend)
+        sdl2.render.SDL_RenderPresent(lose)
+        time.sleep(1/8)
 
 if __name__ == '__main__':
     main()
