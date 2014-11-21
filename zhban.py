@@ -88,17 +88,26 @@ zhban_bitmap_t._fields_ = [
     ("cluster_map_size", ctypes.c_int),
 ]
 
-zhban_postproc_t = ctypes.CFUNCTYPE(None, ctypes.POINTER(zhban_bitmap_t), ctypes.POINTER(zhban_shape_t), ctypes.c_void_p)
+zhban_postproc_t = ctypes.CFUNCTYPE(None,
+    ctypes.POINTER(zhban_bitmap_t), ctypes.POINTER(zhban_shape_t), ctypes.c_void_p)
 
 def bind(libpath = None):
     name = "zhban"
-    libname = dict(win32="{0}.dll", darwin="lib{0}.dylib", cli="{0}.dll").get(sys.platform, "lib{0}.so").format(name)
+    soname = dict(win32="{0}.dll", darwin="lib{0}.dylib", cli="{0}.dll").get(sys.platform, "lib{0}.so").format(name)
+    libnames = []
     if libpath:
-        lib = ctypes.CDLL(os.path.join(libpath, libname))
-    elif 'PGLIBDIR' in os.environ:
-        lib = ctypes.CDLL(os.path.join(os.environ['PGLIBDIR'], libname))
-    else:
-        lib = ctypes.CDLL(ctypes.util.find_library(name))
+        libnames.append(os.path.join(libpath, soname))
+    cufl = ctypes.util.find_library(name)
+    if cufl:
+        libnames.append(cufl)
+    lib = None
+    for libname in libnames:
+        lib = ctypes.CDLL(libname)
+        if lib:
+            break
+    if not lib:
+        raise ZhbanFail("Can't open library (soname={} libpath={})".format(soname, libpath))
+
     lib.zhban_open.restype = ctypes.POINTER(zhban_t)
     lib.zhban_open.argtypes = [ ctypes.c_void_p,        # data
                                 ctypes.c_uint,          # size
