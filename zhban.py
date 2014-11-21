@@ -169,19 +169,24 @@ class ZhbanFail(Exception):
     pass
 
 class Zhban(object):
-    def __init__(self, fontbuf, pixheight, subpix = True, gllim = 1<<20, szlim = 1<<16, rrlim = 1<<24, loglevel = 0, libpath = None):
+    def __init__(self, fontbuf, pixheight, subpix = True, loglevel = 0,
+                gllim = 1<<20, szlim = 1<<16, rrlim = 1<<22, libpath = None):
         if type(fontbuf) is bytes:
             self._fbuf = fontbuf
         else:
             self._fbuf = bytes(fontbuf) # have to copy it.
         self._lib = bind(libpath)
         sp = 1 if subpix else 0
-        self._z = self._lib.zhban_open(self._fbuf, len(self._fbuf), pixheight, sp, gllim, szlim, rrlim, loglevel, 0)
+        self._z = self._lib.zhban_open(self._fbuf, len(self._fbuf), pixheight,
+                                            sp, gllim, szlim, rrlim, loglevel, 0)
         if not bool(self._z):
             raise ZhbanFail
 
         for f in zhban_t._fields_:
             setattr(self, f[0], getattr(self._z.contents, f[0]))
+
+    def fini(self):
+        self._lib.zhban_drop(self._z)
 
     @staticmethod
     def _bufconv(ass):
@@ -197,10 +202,16 @@ class Zhban(object):
     def ppstats(self):
         for f in zhban_t._fields_:
             setattr(self, f[0], getattr(self._z.contents, f[0]))
+        gpc =  self.glyph_hits/self.glyph_gets if self.glyph_gets else -0.5
+        spc =  self.shape_hits/self.shape_gets if self.shape_gets else -0.5
+        bpc =  self.bitmap_hits/self.bitmap_gets if self.bitmap_gets else -0.5
         return (
-            "glyph  {: 5d}/{: 5d} {:.03f} {: 8d}/{:d} bytes".format(self.glyph_hits, self.glyph_gets, self.glyph_hits/self.glyph_gets, self.glyph_size, self.glyph_limit),
-            "shape  {: 5d}/{: 5d} {:.03f} {: 8d}/{:d} bytes".format(self.shape_hits, self.shape_gets, self.shape_hits/self.shape_gets, self.shape_size, self.shape_limit),
-            "bitmap {: 5d}/{: 5d} {:.03f} {: 8d}/{:d} bytes".format(self.bitmap_hits, self.bitmap_gets, self.bitmap_hits/self.bitmap_gets, self.bitmap_size, self.bitmap_limit),
+            "glyph  {: 5d}/{: 5d} {:.03f} {: 7d}/{: 7d} bytes".format(
+                self.glyph_hits, self.glyph_gets, gpc, self.glyph_size, self.glyph_limit),
+            "shape  {: 5d}/{: 5d} {:.03f} {: 7d}/{: 7d} bytes".format(
+                self.shape_hits, self.shape_gets, spc, self.shape_size, self.shape_limit),
+            "bitmap {: 5d}/{: 5d} {:.03f} {: 7d}/{: 7d} bytes".format(
+                self.bitmap_hits, self.bitmap_gets, bpc, self.bitmap_size, self.bitmap_limit),
         )
 
     def shape(self, ass):
