@@ -53,19 +53,22 @@ static void spanner(int px_y, int count, const FT_Span* spans, void *user);
 typedef struct _zhban_internal {
     zhban_t outer;
 
-    int32_t log_level;
+    int32_t   log_level;
     logsink_t log_sink;
 
     uint32_t pixheight;
     uint32_t subpixel_positioning;  /* cache translated glyphs */
 
-    FT_Library ft_lib;
-    FT_Face ft_face;
-    FT_Error ft_err;
-    FT_Raster_Params ftr_params;
+    FT_Library          ft_lib;
+    FT_Face             ft_face;
+    FT_Error            ft_err;
+    FT_Raster_Params    ftr_params;
 
-    hb_font_t *hb_font;
-    hb_buffer_t *hb_buffer;
+    hb_font_t      *hb_font;
+    hb_buffer_t    *hb_buffer;
+    hb_direction_t  hb_direction;
+    hb_script_t     hb_script;
+    hb_language_t   hb_language;
 
     /* shaped strings cache */
     shape_t *shaper_cache;
@@ -230,6 +233,9 @@ zhban_t *zhban_open(const void *data, const uint32_t datalen, uint32_t pixheight
     /* initialize HB font here after font size is set (or ligatures go haywire) */
     rv->hb_font = hb_ft_font_create(rv->ft_face, NULL);
     rv->hb_buffer = hb_buffer_create();
+    rv->hb_direction = HB_DIRECTION_LTR;
+    rv->hb_script = HB_SCRIPT_INVALID;
+    rv->hb_language = HB_LANGUAGE_INVALID;
 
     return (zhban_t *)rv;
 
@@ -238,6 +244,14 @@ zhban_t *zhban_open(const void *data, const uint32_t datalen, uint32_t pixheight
     zhban_drop((zhban_t *)rv);
     free(rv);
     return NULL;
+}
+
+void zhban_set_script(zhban_t *zhban, const char *direction, const char *script, const char *language) {
+    zhban_internal_t *z = (zhban_internal_t *) zhban;
+
+    z->hb_direction = hb_direction_from_string(direction, direction ? strlen(direction) : 0);
+    z->hb_script    = hb_script_from_string(script, script ? strlen(script) : 0);
+    z->hb_language  = hb_language_from_string(language, language ? strlen(language) : 0);
 }
 
 void zhban_drop(zhban_t *zhban) {
@@ -674,9 +688,9 @@ static void shape_string(zhban_internal_t *z, shape_t *item) {
     item->glyphs_used = 0; // reset glyph info/position storage
 
     hb_buffer_clear_contents(z->hb_buffer);
-    hb_buffer_set_direction(z->hb_buffer, HB_DIRECTION_LTR);
-    //hb_buffer_set_script(z->hb_buffer, HB_SCRIPT_LATIN);
-    //hb_buffer_set_language(z->hb_buffer, hb_language_from_string("en", 2));
+    hb_buffer_set_direction(z->hb_buffer, z->hb_direction);
+    hb_buffer_set_script(z->hb_buffer, z->hb_script);
+    hb_buffer_set_language(z->hb_buffer, z->hb_language);
     hb_buffer_add_utf16(z->hb_buffer, item->key, item->key_size/2, 0, item->key_size/2);
 
     hb_shape(z->hb_font, z->hb_buffer, NULL, 0);

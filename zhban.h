@@ -114,11 +114,18 @@ typedef void (*logsink_t)(const int level, const char *fmt, va_list ap);
     verbose - primitive log toggle. spams stdout when nonzero.
 */
 ZHB_EXPORT zhban_t *zhban_open(const void *data, const uint32_t size,
-                                            uint32_t pixheight,
-                                            uint32_t subpixel_positioning,
-                                            uint32_t glyphlimit, uint32_t sizerlimit, uint32_t renderlimit,
-                                            int llevel, logsink_t lsink);
+                                uint32_t pixheight,
+                                uint32_t subpixel_positioning,
+                                uint32_t glyphlimit, uint32_t sizerlimit, uint32_t renderlimit,
+                                int llevel, logsink_t lsink);
 ZHB_EXPORT void zhban_drop(zhban_t *);
+
+/* HarfBuzz specifics for non-latin/cyrillic scripts:
+    direction:  ltr, rtl, ttb, btt
+    script:     see Harfbuzz src/hb-common.h
+    language:   "en" - english, "ar"- arabic, "ch" - chinese. looks like some ISO code
+*/
+ZHB_EXPORT void zhban_set_script(zhban_t *zhban, const char *direction, const char *script, const char *language);
 
 /* returns expected size of bitmap for the string in rv. data pointer is NULL.
    params:

@@ -119,6 +119,12 @@ def bind(libpath = None):
                                 ctypes.c_int,           # log level
                                 ctypes.c_void_p         # log sink
                                 ]
+    lib.zhban_set_script.restype = None
+    lib.zhban_set_script.argtypes = [ ctypes.POINTER(zhban_t),
+                                ctypes.c_char_p,        # direction
+                                ctypes.c_char_p,        # script
+                                ctypes.c_char_p,        # language
+                                ]
     lib.zhban_drop.restype = None
     lib.zhban_drop.argtypes = [ ctypes.POINTER(zhban_t) ]
 
@@ -184,6 +190,15 @@ class Zhban(object):
 
         for f in zhban_t._fields_:
             setattr(self, f[0], getattr(self._z.contents, f[0]))
+
+    def set_script(self, dir, script, lang):
+        if dir is not None:
+            dir = dir.encode('ascii')
+        if script is not None:
+            script = script.encode('ascii')
+        if lang is not None:
+            lang = lang.encode('ascii')
+        self._lib.zhban_set_script(self._z, dir, script, lang)
 
     def fini(self):
         self._lib.zhban_drop(self._z)
