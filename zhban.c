@@ -38,6 +38,23 @@
 #include <hb.h>
 #include <hb-ft.h>
 
+#if defined(USE_SDL2)
+#include "SDL.h"
+typedef SDL_atomic_t refcount_t;
+# define ZHBAN_INCREF(rc) (SDL_AtomicIncRef(&(rc)))
+# if defined(__GNUC__)
+/* lose -Wunused-value warning along with expression status */
+#  define ZHBAN_DECREF(rc) do { int __attribute__ ((unused)) _urc = (SDL_AtomicDecRef(&(rc))); } while(0)
+# else
+#  define ZHBAN_DECREF(rc) (SDL_AtomicDecRef(&(rc)))
+# endif
+# define ZHBAN_GETREF(rc) (SDL_AtomicGet(&(rc)))
+#else
+typedef uint32_t refcount_t;
+# define ZHBAN_INCREF(rc) ((rc)+=1)
+# define ZHBAN_DECREF(rc) ((rc)-=1)
+# define ZHBAN_GETREF(rc) ((rc))
+#endif
 
 //{ context
 
@@ -525,7 +542,7 @@ typedef struct _glyph_info {
 typedef struct _shape {
     zhban_shape_t shape;
 
-    uint32_t refcount;
+    refcount_t refcount;
 
     /* USC-2 string, also hash key */
     uint16_t *key;
@@ -601,7 +618,8 @@ static shape_t *get_idle_shape(zhban_internal_t *z, const uint32_t key_size) {
     /* if we are over the cache size limit, clean up some. */
     DL_FOREACH_SAFE(z->shaper_history, item, tmp) {
         /* ignore referenced ones */
-        if (item->refcount)
+
+        if (ZHBAN_GETREF(item->refcount))
             continue;
 
         /* if we have enough space at last .. */
@@ -794,7 +812,7 @@ zhban_shape_t *zhban_shape(zhban_t *zhban, const uint16_t *string, const uint32_
         /* put the item at the head of history list*/
         DL_DELETE(z->shaper_history, item);
         DL_APPEND(z->shaper_history, item);
-        item->refcount += 1;
+        ZHBAN_INCREF(item->refcount);
         z->outer.shaper_hits += 1;
         return (zhban_shape_t *)item;
     }
@@ -808,8 +826,7 @@ zhban_shape_t *zhban_shape(zhban_t *zhban, const uint16_t *string, const uint32_
     HASH_ADD_KEYPTR(hh, z->shaper_cache, item->key, item->key_size, item);
     DL_APPEND(z->shaper_history, item);
     z->outer.shaper_size += shape_sizeof(item);
-
-    item->refcount += 1;
+    ZHBAN_INCREF(item->refcount);
 
     return (zhban_shape_t *)item;
 }
@@ -817,9 +834,9 @@ zhban_shape_t *zhban_shape(zhban_t *zhban, const uint16_t *string, const uint32_
 void zhban_release_shape(zhban_t *zhban, zhban_shape_t *zs) {
     shape_t *s = (shape_t *)zs;
 
-    if (s->refcount == 0)
+    if (ZHBAN_GETREF(s->refcount) == 0)
         log_fatal((zhban_internal_t *)zhban, "releasing already free shape");
-    s->refcount -= 1;
+    ZHBAN_DECREF(s->refcount);
 }
 
 //}
@@ -855,7 +872,7 @@ static bitmap_t *reallocate_bitmap(const shape_t *shape, bitmap_t *bitmap) {
         memset(bitmap, 0, sizeof(bitmap_t));
     } else {
         if (bitmap->shape) {
-            bitmap->shape->refcount --;
+            ZHBAN_DECREF(bitmap->shape->refcount);
             bitmap->shape = NULL;
         }
     }
@@ -869,7 +886,7 @@ static bitmap_t *reallocate_bitmap(const shape_t *shape, bitmap_t *bitmap) {
 
 static void drop_bitmap(bitmap_t *z) {
     if (z->shape)
-        z->shape->refcount -= 1;
+        ZHBAN_DECREF(z->shape->refcount);
     free(z->bitmap.data);
     free(z);
 }
@@ -1013,7 +1030,7 @@ zhban_bitmap_t *zhban_render_pp(zhban_t *zhban, zhban_shape_t *zshape, zhban_pos
 
     item = get_idle_bitmap(z, shape);
     item->shape = shape;
-    item->shape->refcount += 1;
+    ZHBAN_INCREF(item->shape->refcount);
 
     render_shape(z, item);
 

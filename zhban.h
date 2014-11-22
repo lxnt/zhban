@@ -60,6 +60,10 @@ extern_C_curly_opens
 # define ZHB_EXPORT
 #endif
 
+#if defined(USE_SDL2)
+#include "SDL.h"
+#endif
+
 /* Thread safety:
 
     Intended operation is for the zhban_t pointer to be shared between two threads,
@@ -173,6 +177,14 @@ ZHB_EXPORT uint16_t *zhban_utf16chr(uint16_t *hay, const uint16_t *haylimit, con
 ZHB_EXPORT uint32_t zhban_8to16(uint8_t *src, uint32_t srcsize, uint16_t *dst, uint32_t dstsize);
 ZHB_EXPORT uint32_t zhban_16to8(uint16_t *src, uint32_t srcsize, uint8_t *dst, uint32_t dstsize);
 
+#if defined(USE_SDL2)
+/* caches and returns an GL_RGBA8UI pixel format SDL_Surface */
+ZHB_EXPORT SDL_Surface *zhban_sdl_render_rgba(zhban_t *zhban, zhban_shape_t *shape, SDL_Color fg);
+ZHB_EXPORT SDL_Surface *zhban_sdl_render_argb(zhban_t *zhban, zhban_shape_t *shape, SDL_Color fg);
+
+ZHB_EXPORT SDL_Surface *zhban_sdl_render_fgbg(zhban_t *zhban, zhban_shape_t *shape, SDL_Color fg, SDL_Color bg);
+
+#endif
 
 #if defined(__cplusplus)
 #define extern_C_curly_closes }
