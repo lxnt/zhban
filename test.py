@@ -1,4 +1,5 @@
 #!/usr/bin/python3
+# -*- encoding: utf-8 -*-
 
 import os, sys, ctypes, time, struct
 import re, argparse, subprocess, textwrap
@@ -113,13 +114,18 @@ class StatsWindow(object):
         sdl2.render.SDL_DestroyRenderer(self.ren)
         sdl2.video.SDL_DestroyWindow(self.win)
 
-def wraptext(zhban, text, w, h, fl_indent = 0, method = divide):
+def wraptext(zhban, text, w, h, fl_indent = 0, method = divide, dir='ltr', align='left'):
     color = (0xB0, 0xB0, 0xB0)
     surf = getRGBAsurf(w, h)
     line_step = zhban.line_step
     space_advance = zhban.space_advance
 
-    x = 0
+    if dir == 'ltr':
+        x = 0
+    elif dir == 'rtl':
+        x = w
+    else:
+        raise ZhbalFail("unsupported dir '{}'".format(dir))
     y = line_step
 
     class plead(object):
@@ -141,7 +147,10 @@ def wraptext(zhban, text, w, h, fl_indent = 0, method = divide):
             for line in lines:
                 for shape in line:
                     if type(shape) is plead:
-                        x += len(shape)
+                        if dir == 'ltr':
+                            x += len(shape)
+                        else:
+                            x -= len(shape)
                         continue
                     bitmap = zhban.render_colored(shape, color, vflip = True)
                     bsurf = getRGBAsurf(shape.w, shape.h, bitmap.contents._data)
@@ -157,9 +166,15 @@ def wraptext(zhban, text, w, h, fl_indent = 0, method = divide):
 
                     zhban.release_shape(shape)
 
-                    x += shape.w + space_advance
+                    if dir == 'ltr':
+                        x += shape.w + space_advance
+                    else:
+                        x -= shape.w + space_advance
 
-                x = 0
+                if dir == 'ltr':
+                    x = 0
+                else:
+                    x = w
                 y += line_step
                 if y > (h - line_step):
                     break
@@ -193,6 +208,9 @@ def main():
     ap.add_argument('-font', metavar='font', type=str, default=defont, help="font file")
     ap.add_argument('-size', type=int, default=18, help='font size')
     ap.add_argument('-f', type=str, metavar='text.file', help='text file (utf-8)')
+    ap.add_argument('-dir', type=str, default='ltr', help='direction (ltr, rtl, ttb, btt)')
+    ap.add_argument('-script', type=str, help='script')
+    ap.add_argument('-lang', type=str, help='language')
     ap.add_argument('-l', type=int, metavar='loglevel', default=4, help='log level (0-5)')
     ap.add_argument('-sp', action="store_true", help='enable subpixel positioning')
     ap.add_argument('words', nargs='*', default=[])
@@ -209,6 +227,12 @@ def main():
     zhban = Zhban(open(pa.font, "rb").read(), pa.size, loglevel=pa.l, subpix=pa.sp,
                             libpath = os.environ.get('PYSDL2_DLL_PATH'))
 
+    zhban.set_script(pa.dir, pa.script, pa.lang)
+    if pa.dir == 'rtl':
+        align = 'right'
+    else:
+        align = 'left'
+
     sdl2.SDL_Init(sdl2.SDL_INIT_VIDEO | sdl2.SDL_INIT_NOPARACHUTE)
 
     w = 480
@@ -220,7 +244,7 @@ def main():
     fl_indent = 0
     method = divide
     reflow = False
-    surf = wraptext(zhban, text, w - 32, h - 32, fl_indent, method)
+    surf = wraptext(zhban, text, w - 32, h - 32, fl_indent, method, pa.dir, align)
     ev = sdl2.events.SDL_Event()
     vp = sdl2.rect.SDL_Rect(0, 0, w, h)
     sdl2.render.SDL_RenderSetViewport(lose, ctypes.byref(vp))
@@ -266,7 +290,7 @@ def main():
 
         if reflow:
             sdl2.surface.SDL_FreeSurface(surf)
-            surf = wraptext(zhban, text, w - 32, h - 32, fl_indent, method)
+            surf = wraptext(zhban, text, w - 32, h - 32, fl_indent, method, pa.dir, align)
             reflow = False
 
         drawsurf(lose, surf, border, blend)
