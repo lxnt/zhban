@@ -1,7 +1,7 @@
 Wotsit?
 -------
 
-This is a take on aggresively cached lockless text shaping and rendering using `HarfBuzz <http://harfbuzz.org>`__
+This is a take on aggressively cached lockless text shaping and rendering using `HarfBuzz <http://harfbuzz.org>`__
 and `FreeType <http://freetype.org>`__.
 
 Main driver behind this effort was the need to replace SDL_ttf -based text renderer in
