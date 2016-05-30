@@ -14,7 +14,7 @@ import sdl2.render
 from sdl2.keycode import *
 
 from zhban import *
-from divide import *
+from zhban.divide import *
 
 def init(size=(480, 320), title='zhban test', icon=None, resizable = True):
     if resizable:

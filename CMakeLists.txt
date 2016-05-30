@@ -63,5 +63,3 @@ if (USE_SDL2)
 endif()
 install(TARGETS zhbantest RUNTIME DESTINATION bin/)
 
-install(FILES zhban.h DESTINATION include)
-install(FILES zhban.py DESTINATION lib/python3.2/site-packages)

@@ -92,12 +92,12 @@ Files
 
 ``zhban.h, zhban-internal.h zhban.c, utf.c logging.c`` - core code. use ``cmake`` to build.
 
-``zhban.py`` - ctypes Python bindings.
+``python/zhban`` - ctypes Python bindings.
 
-``test.py`` - renders multiple paragraphs of text. usage: ``python3 test.py path/to/font.ttf some_text_file``.
+``python/zhban/test.py`` - renders multiple paragraphs of text. usage: ``python3 test.py path/to/font.ttf some_text_file``.
 Reflows text on resize. Requires `py-sdl2  <https://bitbucket.org/marcusva/py-sdl2>`__ and `SDL2 <http://www.libsdl.org/>`__.
 
-``divide.py`` - line-breaking code taken from http://xxyxyz.org/line-breaking/
+``python/zhban/divide.py`` - line-breaking code taken from http://xxyxyz.org/line-breaking/
 
 ``cyzhban.pyx, cyzhban.pxd, setup.py`` - stale Cython bindings.
 
