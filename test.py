@@ -209,14 +209,16 @@ def main():
     ap.add_argument('-size', type=int, default=18, help='font size')
     ap.add_argument('-f', type=str, metavar='text.file', help='text file (utf-8)')
     ap.add_argument('-dir', type=str, default='ltr', help='direction (ltr, rtl, ttb, btt)')
-    ap.add_argument('-script', type=str, help='script')
-    ap.add_argument('-lang', type=str, help='language')
+    ap.add_argument('-script', type=str, help='script: see Harfbuzz src/hb-common.h: Latn, Cyrl, etc')
+    ap.add_argument('-lang', type=str, help='language: "en" - english, "ar"- arabic, "ch" - chinese. looks like some ISO code')
     ap.add_argument('-l', type=int, metavar='loglevel', default=4, help='log level (0-5)')
     ap.add_argument('-sp', action="store_true", help='enable subpixel positioning')
     ap.add_argument('words', nargs='*', default=[])
     pa = ap.parse_args()
 
     if pa.f is None:
+        if len(pa.words) == 0:
+            ap.error("text file or words as arguments are required")
         text = ' '.join(pa.words)
     else:
         text = open(pa.f, 'r', encoding='utf-8').read()
