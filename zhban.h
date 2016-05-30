@@ -126,7 +126,7 @@ ZHB_EXPORT void zhban_drop(zhban_t *);
 
 /* HarfBuzz specifics for non-latin/cyrillic scripts:
     direction:  ltr, rtl, ttb, btt
-    script:     see Harfbuzz src/hb-common.h
+    script:     see Harfbuzz src/hb-common.h Latn, Cyrl, etc.
     language:   "en" - english, "ar"- arabic, "ch" - chinese. looks like some ISO code
 */
 ZHB_EXPORT void zhban_set_script(zhban_t *zhban, const char *direction, const char *script, const char *language);
