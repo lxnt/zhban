@@ -3,4 +3,6 @@
 build/*
 cyzhban.c
 SciTEDirectory.properties
-
+python/build/*
+python/dist/*
+python/zhban.egg-info/*
