@@ -181,9 +181,7 @@ ZHB_EXPORT uint32_t zhban_16to8(uint16_t *src, uint32_t srcsize, uint8_t *dst, u
 /* caches and returns an GL_RGBA8UI pixel format SDL_Surface */
 ZHB_EXPORT SDL_Surface *zhban_sdl_render_rgba(zhban_t *zhban, zhban_shape_t *shape, SDL_Color fg);
 ZHB_EXPORT SDL_Surface *zhban_sdl_render_argb(zhban_t *zhban, zhban_shape_t *shape, SDL_Color fg);
-
 ZHB_EXPORT SDL_Surface *zhban_sdl_render_fgbg(zhban_t *zhban, zhban_shape_t *shape, SDL_Color fg, SDL_Color bg);
-
 #endif
 
 #if defined(__cplusplus)

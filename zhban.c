@@ -232,7 +232,8 @@ zhban_t *zhban_open(const void *data, const uint32_t datalen, uint32_t pixheight
 
     rv->outer.space_advance = rv->ft_face->glyph->linearHoriAdvance>>16;
 
-    log_info(rv, "accepted metrics: asc %d desc %d height %d em_width %d space_advance %d pixheight %d",
+    log_info(rv, "accepted metrics: asc %d desc %d height %d em_width %d line_step %d "
+                 "space_advance %d pixheight %d",
             rv->ft_face->size->metrics.ascender >> 6,
             rv->ft_face->size->metrics.descender >> 6,
             rv->ft_face->size->metrics.height >> 6,
@@ -480,7 +481,7 @@ error:
 
 static glyph_t *get_a_glyph(zhban_internal_t *z, uint32_t codepoint, int32_t frac_x, int32_t frac_y) {
     glyph_t *item;
-    const int keylen = 3 * sizeof(int32_t);
+    const size_t keylen = 3 * sizeof(int32_t);
 
     if (z->subpixel_positioning) {
         glyph_t key;
@@ -612,8 +613,8 @@ static shape_t *get_idle_shape(zhban_internal_t *z, const uint32_t key_size) {
 
     /* if we are over the cache size limit, clean up some. */
     DL_FOREACH_SAFE(z->shaper_history, item, tmp) {
-        /* ignore referenced ones */
 
+        /* ignore referenced ones */
         if (ZHBAN_GETREF(item->refcount))
             continue;
 
@@ -628,7 +629,7 @@ static shape_t *get_idle_shape(zhban_internal_t *z, const uint32_t key_size) {
             break;
         }
 
-        /* drop evicted item if we need to evict more that one */
+        /* drop evicted item if we need to evict more than one */
         if(evicted_item)
             drop_shape(evicted_item);
 
@@ -701,6 +702,7 @@ static void shape_string(zhban_internal_t *z, shape_t *item) {
     item->glyphs_used = 0; // reset glyph info/position storage
 
     hb_buffer_clear_contents(z->hb_buffer);
+    /* do those three need be done after _clear_contents() ? */
     hb_buffer_set_direction(z->hb_buffer, z->hb_direction);
     hb_buffer_set_script(z->hb_buffer, z->hb_script);
     hb_buffer_set_language(z->hb_buffer, z->hb_language);
