@@ -1,7 +1,5 @@
 from setuptools import setup, find_packages
 
-long_description = "Python bindings for the zhban text shaper"
-
 setup(
     name='zhban',
 
@@ -11,7 +9,7 @@ setup(
     version='0.0.1',
 
     description='Zhban python bindings',
-    long_description=long_description,
+    long_description="Python bindings for the zhban text shapecacher",
 
     # The project's main homepage.
     url='https://github.com/lxnt/zhban',
@@ -92,7 +90,7 @@ setup(
     # pip to create the appropriate form of executable for the target platform.
     entry_points={
         'console_scripts': [
-            'zhbanpytest=zhban.test:main',
+            'zhbantest_py=zhban.test:main',
         ],
     },
 )

@@ -1,7 +1,8 @@
 cmake_minimum_required(VERSION 2.8)
-project(libhbf)
+project(zhban)
 
 set(ENV{PKG_CONFIG_PATH} "${CMAKE_INSTALL_PREFIX}/lib/pkgconfig/:${CMAKE_INSTALL_PREFIX}/lib/x86_64-linux-gnu/pkgconfig/:")
+set(ENV{PYTHONPATH} "${CMAKE_INSTALL_PREFIX}/lib/python3.4/site-packages")
 
 if(CMAKE_SIZEOF_VOID_P EQUAL 8)
   set(ARCH64 TRUE)
@@ -23,6 +24,12 @@ if (ARCH64)
 endif()
 
 option(BUILD_STATIC "Build libzhban_s.a" OFF)
+
+option(PYTHON_BINDINGS "Install python bindings, test app" ON)
+if (PYTHON_BINDINGS)
+    find_program(PYTHON NAMES python3 python2 python DOC "python binary for the bindings install")
+endif()
+
 
 include(FindPkgConfig)
 pkg_check_modules(PKG_FT2 REQUIRED freetype2)
@@ -63,3 +70,12 @@ if (USE_SDL2)
 endif()
 install(TARGETS zhbantest RUNTIME DESTINATION bin/)
 
+if (PYTHON_BINDINGS)
+  if (${PYTHON} STREQUAL "PYTHON-NOTFOUND")
+    message(WARNING "python is ${PYTHON}, that is, missing")
+  else()
+    file(COPY ${CMAKE_SOURCE_DIR}/python DESTINATION ${CMAKE_BINARY_DIR})
+    configure_file(${CMAKE_SOURCE_DIR}/python/install.sh.in ${CMAKE_BINARY_DIR}/python/install.sh @ONLY)
+    install(CODE "execute_process(COMMAND sh install.sh WORKING_DIRECTORY ${CMAKE_BINARY_DIR}/python)")
+  endif()
+endif()

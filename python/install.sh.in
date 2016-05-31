@@ -1,0 +1,5 @@
+#!/bin/sh
+
+PYTHONVER=`@PYTHON@ -c 'import sys; v=sys.version_info; print(".".join(map(str, (v.major, v.minor))))'`
+export PYTHONPATH=@CMAKE_INSTALL_PREFIX@/lib/python${PYTHONVER}/site-packages
+@PYTHON@ setup.py install --force --prefix @CMAKE_INSTALL_PREFIX@
