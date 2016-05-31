@@ -42,12 +42,7 @@
 #include "SDL.h"
 typedef SDL_atomic_t refcount_t;
 # define ZHBAN_INCREF(rc) (SDL_AtomicIncRef(&(rc)))
-# if defined(__GNUC__)
-/* lose -Wunused-value warning along with expression status */
-#  define ZHBAN_DECREF(rc) do { int __attribute__ ((unused)) _urc = (SDL_AtomicDecRef(&(rc))); } while(0)
-# else
-#  define ZHBAN_DECREF(rc) (SDL_AtomicDecRef(&(rc)))
-# endif
+# define ZHBAN_DECREF(rc) (SDL_AtomicDecRef(&(rc)))
 # define ZHBAN_GETREF(rc) (SDL_AtomicGet(&(rc)))
 #else
 typedef uint32_t refcount_t;
