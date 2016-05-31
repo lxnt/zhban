@@ -1,0 +1,35 @@
+Total monotonicity
+
+Each iteration of the dynamic programming scheme can also be seen as filling in a matrix, where a cell adds up the least overall cost to a subproblem (a column minimum) and a penalty. A concave weight function implies that the matrix is totally monotone and in 1987 Shor, Moran, Aggarwal, Wilber and Klawe devised an algorithm which finds the row maxima of such matrix in linear time. Even though SMAWK can be modified to find column minima instead, it is not possible to apply it directly to this "on-line" matrix as it might try to evaluate a not "available" cell, i.e. a cell dependent on some yet unknown column minimum. However, Wilber came up with an algorithm in 1988 which "pretends" to know the minima and still runs in O(n) time. An "ordered" algorithm which obeys the availability of the matrix as presented by Aggarwal and Tokuyama in 1998 follows.
+
+Divide & conquer
+
+One additional option is to replace the preceding SMAWK routine and its fairly large constant factor by a simple divide & conquer monotone matrix search. The complexity will drop back to O(n * log n) but for smaller problem instances it may actually run faster than the asymptotically superior approach.
+    
+Further reading
+
+D. E. Knuth, M. F. Plass. Breaking Paragraphs into Lines. Software--Practice and Experience 11, 1981.
+
+D. S. Hirschberg, L. L. Larmore. The least weight subsequence problem. SIAM Journal on Computing, 1987.
+
+D. S. Hirschberg, L. L. Larmore. New applications of failure functions. Journal of the Association for Computer Machinery, 1987.
+
+A. Aggarwal, M. M. Klawe, S. Moran, P. Shor, R. Wilber. Geometric Applications of a Matrix-Searching Algorithm. Algorithmica 2, 1987.
+
+R. Wilber. The Concave Least-Weight Subsequence Problem Revisited. Journal of Algorithms 9, 1988.
+
+Z. Galil, R. Giancarlo. Speeding up dynamic programming with applications to molecular biology. Theoretical Computer Science 64, 1989.
+
+Z. Galil, K. Park. A Linear-Time Algorithm for Concave One-Dimensional Dynamic Programming. Information Processing Letters 33, 1989.
+
+D. Eppstein. Sequence comparison with mixed convex and concave costs. Journal of Algorithms 11, 1990.
+
+D. Eppstein, Z. Galil, R. Giancarlo, G. F. Italiano. Sparse dynamic programming II: Convex and concave cost functions. Journal of the ACM, 1992.
+
+P. Becker. Construction of Nearly Optimal Multiway Trees. COCOON, vol. 1276 of Lecture Notes in Computer Science, 1997.
+
+O. de Moor, J. Gibbons. Bridging the Algorithm Gap: A Linear-time Functional Program for Paragraph Formatting. Technical Report, Oxford Brookes University, 1997.
+
+A. Aggarwal, T. Tokuyama. Consecutive interval query and dynamic programming on intervals. Discrete Applied Mathematics 85, 1998.
+
+— 21. 2. 2014
