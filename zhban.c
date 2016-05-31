@@ -1074,4 +1074,17 @@ void zhban_pp_color_vflip(zhban_bitmap_t *b, zhban_shape_t *s ATTR_UNUSED, void 
     free(b->data);
     b->data = buf;
 }
+#if defined(USE_SDL2)
+SDL_Surface *zhban_sdl_render_rgba(zhban_t *zhban, zhban_shape_t *shape, SDL_Color fg) {
+    return NULL;
+}
+
+SDL_Surface *zhban_sdl_render_argb(zhban_t *zhban, zhban_shape_t *shape, SDL_Color fg) {
+    return NULL;
+}
+
+SDL_Surface *zhban_sdl_render_fgbg(zhban_t *zhban, zhban_shape_t *shape, SDL_Color fg, SDL_Color bg) {
+    return NULL;
+}
+#endif
 //}
