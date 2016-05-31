@@ -101,6 +101,6 @@ Reflows text on resize. Requires `py-sdl2  <https://bitbucket.org/marcusva/py-sd
 
 ``cyzhban.pyx, cyzhban.pxd`` - stale Cython bindings.
 
-![Screenshot](para3.png)
+.. image:: para3.png
 
 
