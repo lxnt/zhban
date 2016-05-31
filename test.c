@@ -2,46 +2,60 @@
 #include <stdlib.h>
 #include <string.h>
 #include <stdint.h>
+#include <errno.h>
 #include "zhban.h"
 
 int usage() {
     fprintf(stderr, "Usage: zhbantest path-to-ttf-file path-to-text-file\n\n");
-    fprintf(stderr, "   ex: zhbantest /usr/share/fonts/truetype/droid/DroidSans.ttf /etc/lsb-release\n\n");
+    fprintf(stderr, "  e.g. zhbantest /usr/share/fonts/truetype/droid/DroidSans.ttf /etc/lsb-release\n\n");
     return 1;
 }
 
+void *fufread(const char *fname, uint32_t *fsize) {
+    FILE *tfp = fopen(fname, "r");
+    if (!tfp) {
+        fprintf(stderr, " fopen(%s): %s\n", fname, strerror(errno));
+        return NULL;
+    }
+
+    fseek(tfp, 0, SEEK_END);
+    *fsize = ftell(tfp);
+    fseek(tfp, 0, SEEK_SET);
+
+    void *buf = malloc(*fsize);
+    if (!buf) {
+        fprintf(stderr, " malloc(%u): %s\n", *fsize, strerror(errno));
+        fclose(tfp);
+        return NULL;
+    }
+
+    if (1 != fread(buf, *fsize, 1, tfp)) {
+        fprintf(stderr, " fread(%s, %u): %s\n", fname, *fsize, strerror(errno));
+        fclose(tfp);
+        free(buf);
+        return NULL;
+    }
+    fclose(tfp);
+    return buf;
+}
+
 int main(int argc, char *argv[]) {
-    FILE *tfp;
+    uint32_t fsize;
 
     if (argc < 3)
         return usage();
 
-    tfp = fopen(argv[1], "r");
-    if (!tfp)
-        return usage();
-
-    fseek(tfp, 0, SEEK_END);
-    uint32_t fsize = ftell(tfp);
-    fseek(tfp, 0, SEEK_SET);
-
-    void *fbuf = malloc(fsize);
-    fread(fbuf, 1, fsize, tfp);
-    fclose(tfp);
+    void *fbuf = fufread(argv[1], &fsize);
+    if (!fbuf)
+        return 1;
 
     zhban_t *zhban = zhban_open(fbuf, fsize, 18, 1, 1<<20, 1<<16, 1<<24, 5, NULL);
     if (!zhban)
         return 1;
 
-    tfp = fopen(argv[2], "r");
-    if (!tfp)
-        return usage();
-
-    fseek(tfp, 0, SEEK_END);
-    fsize = ftell(tfp);
-    fseek(tfp, 0, SEEK_SET);
-    void *tbuf = malloc(fsize);
-    fread(tbuf, 1, fsize, tfp);
-    fclose(tfp);
+    void *tbuf = fufread(argv[2], &fsize);
+    if (!tbuf)
+        return 1;
 
     /* testing strategy: ? */
     uint16_t *p, *ep, *et = (uint16_t*)tbuf + fsize/2 - 1;
@@ -50,7 +64,12 @@ int main(int argc, char *argv[]) {
     zhban_shape_t **zsa;
     zhban_bitmap_t *zb;
     int sindex;
-    zsa = malloc(sizeof(zhban_shape_t *) * fsize/2);
+    uint32_t zsa_sz = sizeof(zhban_shape_t *) * fsize/2;
+    zsa = malloc(zsa_sz);
+    if (!zsa) {
+        fprintf(stderr, " malloc(%u): %s\n", zsa_sz, strerror(errno));
+        goto zsa_fail;
+    }
     for (int i=0; i< 1<<12 ; i++) {
         memset(zsa, 0, sizeof(zhban_shape_t *) * fsize/2);
         ep = p = (uint16_t *)tbuf;
@@ -84,6 +103,7 @@ int main(int argc, char *argv[]) {
     zhban_drop(zhban);
     free(fbuf);
     free(tbuf);
+  zsa_fail:
     free(zsa);
     return 1;
 }
