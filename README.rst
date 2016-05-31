@@ -44,14 +44,14 @@ a rendered bitmap of the shape. This pointer is valid only up to next call to ``
 
 The bitmap is in OpenGL RG16UI format. The R channel contains 'intensity' and the G channel contains cluster attribution -
 an index, starting from 0, of the UTF-16 character (technically called 'cluster', since there might be multiple
-glyphs representing one Unicode code point, or vice versa) that caused the pixel in question to ahve non-zero intensity. This is indended
+glyphs representing one Unicode code point, or vice versa) that caused the pixel in question to have non-zero intensity. This is indended
 to be used in multi-colored text. Currently the ligatures end up with the index of their first charater.
 
 ``zhban_bitmap_t::cluster_map`` contains same cluster attribution but for the zero-intensity pixels. It is a strip of same width as the bitmap,
 roughly indicating which cluster a pixel column corresponds to. This is intended for coloring background per-character, showing text selection
 as color inversion and the like.
 
-``zhban_render_pp()`` accepts a post-processing function which can be used to convert and cache the bitmap from the default RG16UI format.
+``zhban_render_pp()`` accepts a post-processing function which can be used to convert the bitmap from the default RG16UI format and cache the result.
 
 ``zhban_pp_color()`` is a convenience post-processor, converting RG16UI bitmap into a RGBA8UI one, single color.
 
@@ -99,8 +99,8 @@ Reflows text on resize. Requires `py-sdl2  <https://bitbucket.org/marcusva/py-sd
 
 ``python/zhban/divide.py`` - line-breaking code taken from http://xxyxyz.org/line-breaking/
 
-``cyzhban.pyx, cyzhban.pxd, setup.py`` - stale Cython bindings.
+``cyzhban.pyx, cyzhban.pxd`` - stale Cython bindings.
 
-[Screenshot](para3.png)
+![Screenshot](para3.png)
 
 
