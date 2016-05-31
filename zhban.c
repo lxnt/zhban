@@ -292,7 +292,7 @@ typedef struct _span {
     uint16_t coverage;  /* bit-replicate expanded from uint8_t */
 } span_t;
 
-typedef struct _glyph {
+struct _glyph {
     /* key */
     uint32_t  codepoint;
     int32_t   frac_x; /* fractional part of translation */
@@ -313,7 +313,7 @@ typedef struct _glyph {
     UT_hash_handle hh;
     struct _glyph *prev;
     struct _glyph *next;
-} glyph_t;
+};
 
 static void add_glyph_spans(glyph_t *dst, const int32_t y, const FT_Span *spans, const uint32_t count) {
     const uint32_t required_bytes = count * sizeof(span_t);
@@ -534,7 +534,7 @@ typedef struct _glyph_info {
     uint32_t  cluster;
 }   glyph_info_t;
 
-typedef struct _shape {
+struct _shape {
     zhban_shape_t shape;
 
     refcount_t refcount;
@@ -552,7 +552,7 @@ typedef struct _shape {
     UT_hash_handle hh;
     struct _shape *prev;
     struct _shape *next;
-} shape_t;
+};
 
 static inline uint32_t expected_glyph_count(const uint32_t key_size) {
     /* FIXME: ? */
@@ -836,7 +836,7 @@ void zhban_release_shape(zhban_t *zhban, zhban_shape_t *zs) {
 
 //}
 //{ bitmap_t
-typedef struct _bitmap {
+struct _bitmap {
     zhban_bitmap_t bitmap;
 
     shape_t *shape;       /* out there in the shaper. also - key. */
@@ -846,7 +846,7 @@ typedef struct _bitmap {
     UT_hash_handle hh;
     struct _bitmap *prev;
     struct _bitmap *next;
-} bitmap_t;
+};
 
 static uint32_t bitmap_sizeof(const bitmap_t *p) {
     return sizeof(bitmap_t) + p->data_allocd;
