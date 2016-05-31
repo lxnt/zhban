@@ -103,4 +103,4 @@ Reflows text on resize. Requires `py-sdl2  <https://bitbucket.org/marcusva/py-sd
 
 .. image:: para3.png
 
-
+ ``zhbantest_py -f para3 -sp -font /usr/share/fonts/truetype/Input/Input-Regular_\(InputMonoNarrow-Light\).ttf``
