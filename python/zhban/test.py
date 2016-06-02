@@ -226,7 +226,10 @@ def main():
     if not pa.font:
         ap.error("Font is required.")
 
-    zhban = Zhban(open(pa.font, "rb").read(), pa.size, loglevel=pa.l, subpix=pa.sp,
+    def log_sink(z, ll, msg):
+        print("custom_log_sink: [{}] {}".format(z.LOG_LEVEL[ll], msg))
+
+    zhban = Zhban(open(pa.font, "rb").read(), pa.size, loglevel=pa.l, subpix=pa.sp, logsink = log_sink,
                             libpath = os.environ.get('PYSDL2_DLL_PATH'))
 
     zhban.set_script(pa.dir, pa.script, pa.lang)

@@ -52,11 +52,11 @@ if (USE_SDL2)
 endif()
 
 if (BUILD_STATIC)
-    add_library(zhban_s STATIC zhban.c utf.c logging.c)
+    add_library(zhban_s STATIC zhban.c utf.c)
     install(TARGETS zhban_s ARCHIVE DESTINATION lib)
 endif()
 
-add_library(zhban SHARED zhban.c utf.c logging.c)
+add_library(zhban SHARED zhban.c utf.c)
 target_link_libraries(zhban ${PKG_HBZ_LIBRARIES} ${PKG_FT2_LIBRARIES})
 if (USE_SDL2)
     target_link_libraries(zhban ${PKG_SDL2_LIBRARIES})

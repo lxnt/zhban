@@ -174,8 +174,19 @@ def bind(libpath = None):
 class ZhbanFail(Exception):
     pass
 
+_LOG_SINK_ADAPTER = ctypes.CFUNCTYPE(None, ctypes.c_uint32, ctypes.c_char_p, ctypes.c_uint32)
+
 class Zhban(object):
-    def __init__(self, fontbuf, pixheight, subpix = True, loglevel = 0,
+    LOG_LEVEL = ( "null", "fatal", "error", "warn ", "info ", "trace" )
+
+    def _log_sink_adapter(self, level, buf, buflen):
+        msg = ctypes.string_at(buf, buflen).decode("utf-8")
+        if self.logsink is None:
+            sys.stderr.write("[{}] {}\n".format(self.LOG_LEVEL[level], msg))
+        else:
+            self.logsink(self, level, msg)
+
+    def __init__(self, fontbuf, pixheight, subpix = True, loglevel = 0, logsink = None,
                 gllim = 1<<20, szlim = 1<<16, rrlim = 1<<22, libpath = None):
         if type(fontbuf) is bytes:
             self._fbuf = fontbuf
@@ -183,8 +194,12 @@ class Zhban(object):
             self._fbuf = bytes(fontbuf) # have to copy it.
         self._lib = bind(libpath)
         sp = 1 if subpix else 0
+
+        self.logsink = logsink
+
         self._z = self._lib.zhban_open(self._fbuf, len(self._fbuf), pixheight,
-                                            sp, gllim, szlim, rrlim, loglevel, 0)
+                                            sp, gllim, szlim, rrlim, loglevel,
+                                            _LOG_SINK_ADAPTER(self._log_sink_adapter))
         if not bool(self._z):
             raise ZhbanFail
 

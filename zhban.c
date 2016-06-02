@@ -25,7 +25,6 @@
 #include <stddef.h>
 
 #include "zhban.h"
-#include "zhban-internal.h"
 
 #include <uthash.h>
 #include <utlist.h>
@@ -51,6 +50,14 @@ typedef uint32_t refcount_t;
 # define ZHBAN_GETREF(rc) ((rc))
 #endif
 
+#if defined(__GNUC__) || defined(__clang__)
+# define ATTR_UNUSED __attribute__((unused))
+#else
+# define ATTR_UNUSED
+#endif
+
+#define LOG_BUFFER_LEN 1024
+
 //{ context
 
 typedef struct _shape shape_t;
@@ -66,7 +73,8 @@ typedef struct _zhban_internal {
     zhban_t outer;
 
     int32_t   log_level;
-    logsink_t log_sink;
+    zhban_logsink_t log_sink;
+    char log_buffer[LOG_BUFFER_LEN];
 
     uint32_t pixheight;
     uint32_t subpixel_positioning;  /* cache translated glyphs */
@@ -98,6 +106,35 @@ typedef struct _zhban_internal {
 
 } zhban_internal_t;
 
+//{ logging
+
+static void logrintf(int msg_level, zhban_internal_t *z, const char *fmt, ...) {
+    int written = 0;
+    if (msg_level <= z->log_level) {
+        va_list ap;
+        va_start(ap, fmt);
+        written = vsnprintf(z->log_buffer, LOG_BUFFER_LEN, fmt, ap);
+        va_end(ap);
+        z->log_sink(msg_level, z->log_buffer, written);
+    }
+    if (msg_level == ZHLOG_FATAL)
+        abort();
+}
+
+#define log_trace(obj, fmt, args...) do { logrintf(ZHLOG_TRACE, obj, "%s(): " fmt, __func__, ## args); } while(0)
+#define log_info(obj, fmt, args...)  do { logrintf(ZHLOG_INFO,  obj, "%s(): " fmt, __func__, ## args); } while(0)
+#define log_warn(obj, fmt, args...)  do { logrintf(ZHLOG_WARN,  obj, "%s(): " fmt, __func__, ## args); } while(0)
+#define log_error(obj, fmt, args...) do { logrintf(ZHLOG_ERROR, obj, "%s(): " fmt, __func__, ## args); } while(0)
+#define log_fatal(obj, fmt, args...) do { logrintf(ZHLOG_FATAL, obj, "%s(): " fmt, __func__, ## args); } while(0)
+
+const char *log_level_name[] = { "null", "fatal", "error", "warn ", "info ", "trace" };
+
+static void logsink_stderr(const int level, const char *buf, const uint32_t len ATTR_UNUSED) {
+    fprintf(stderr, "[%s] %s\n", log_level_name[level], buf);
+}
+
+//}
+
 static int force_ucs2_charmap(FT_Face ftf) {
     for(int i = 0; i < ftf->num_charmaps; i++)
         if ((  (ftf->charmaps[i]->platform_id == 0)
@@ -111,7 +148,7 @@ static int force_ucs2_charmap(FT_Face ftf) {
 zhban_t *zhban_open(const void *data, const uint32_t datalen, uint32_t pixheight,
                                         uint32_t subpx,
                                         uint32_t glyphlimit, uint32_t shaperlimit, uint32_t renderlimit,
-                                        int32_t loglevel, logsink_t logsink) {
+                                        int32_t loglevel, zhban_logsink_t logsink) {
 
     zhban_internal_t *rv = malloc(sizeof(zhban_internal_t));
     if (!rv)
@@ -123,7 +160,7 @@ zhban_t *zhban_open(const void *data, const uint32_t datalen, uint32_t pixheight
     rv->outer.bitmap_limit = renderlimit;
 
     rv->log_level = loglevel;
-    rv->log_sink  = logsink ? logsink : printfsink;
+    rv->log_sink  = logsink ? logsink : logsink_stderr;
 
     if ((rv->ft_err = FT_Init_FreeType(&rv->ft_lib)))
         goto error;

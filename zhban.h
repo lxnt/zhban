@@ -107,7 +107,7 @@ typedef struct _zhban_bitmap {
 #define ZHLOG_ERROR 2
 #define ZHLOG_FATAL 1
 
-typedef void (*logsink_t)(const int level, const char *fmt, va_list ap);
+typedef void (*zhban_logsink_t)(const int level, const char *buffer, const uint32_t len);
 
 /* prepare to use a font face that FreeType2 can handle.
     data, size - buffer with the font data (must not be freed or modified before drop() call)
@@ -121,7 +121,7 @@ ZHB_EXPORT zhban_t *zhban_open(const void *data, const uint32_t size,
                                 uint32_t pixheight,
                                 uint32_t subpixel_positioning,
                                 uint32_t glyphlimit, uint32_t sizerlimit, uint32_t renderlimit,
-                                int llevel, logsink_t lsink);
+                                int llevel, zhban_logsink_t lsink);
 ZHB_EXPORT void zhban_drop(zhban_t *);
 
 /* HarfBuzz specifics for non-latin/cyrillic scripts:
